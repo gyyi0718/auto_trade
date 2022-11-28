@@ -1,0 +1,13 @@
+*.pdf
+traindata.pt
+.vscode
+.ipynb_checkpoints
+graph
+transformer-gif
+*.h5
+*.pkl
+*.pt
+*.csv
+*.png
+*.jpg
+*.bmp
