@@ -60,17 +60,6 @@ def write_minutes_data():
         time_obj = cryptocompare.get_historical_price_minute('BTC', 'USD', limit=1440, exchange='CCCAGG', toTs=minute_time)
         for i in time_obj:
             df = pd.DataFrame(data=i, columns=i.keys(), index=[0])
-            df.to_csv(save_path, mode='a', sep=',', index=False, header=False)
-
-def write_minutes_data2():
-    start_date = date(2022, 11, 27)
-    start_minutes = _format_timestamp(start_date)
-    end_minutes = _format_timestamp(start_date+3600*12)
-    save_path = 'minute_pred_%s.csv'%today
-    for minute_time in range(start_minutes, end_minutes,60):
-        time_obj = cryptocompare.get_historical_price_minute('BTC', 'KRW', limit=1440, exchange='CCCAGG', toTs=minute_time)
-        for i in time_obj:
-            df = pd.DataFrame(data=i, columns=i.keys(), index=[0])
             if minute_time==start_minutes:
                 df.to_csv(save_path, mode='a', sep=',', index=False, header=True)
             else:

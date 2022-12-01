@@ -11,3 +11,13 @@ transformer-gif
 *.png
 *.jpg
 *.bmp
+=======
+*.h5
+*.png
+*.jpg
+*.bmp
+*.pkl
+*.pt
+*.csv
+./idea/*
+./graph/*
