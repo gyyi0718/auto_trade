@@ -14,7 +14,7 @@ class PatchGenerator:
     def __call__(self, img):
         num_channels = img.size(0)
         patches = img.unfold(1, self.patch_size, self.patch_size).unfold(2, self.patch_size, self.patch_size).reshape(
-            num_channels, -1, self.patch_size, self.patch_size)
+                num_channels, -1, self.patch_size, self.patch_size)
         patches = patches.permute(1, 0, 2, 3)
         num_patch = patches.size(0)
 

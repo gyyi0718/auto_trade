@@ -68,6 +68,7 @@ class PositionalEncoding(nn.Module):
     def forward(self, x):
         return x + self.pe[:x.size(0), :]
 
+
 class TransAm(nn.Module):
     def __init__(self, feature_size=250, num_layers=1, dropout=0.1):
         super(TransAm, self).__init__()
@@ -106,26 +107,26 @@ def main_fun():
     series = read_csv('bitcoin_minute_test.csv', header=0, index_col=0, parse_dates=True, squeeze=True)
     scaler = MinMaxScaler(feature_range=(-1, 1))
     amplitude = scaler.fit_transform(series['open'].to_numpy().reshape(-1, 1)).reshape(-1)
-    amplitude = np.array(amplitude,float)
+    amplitude = np.array(amplitude, float)
     test_sequence = create_inout_sequences(amplitude, input_window)
-    mod = len(amplitude)%60
-    size = len(amplitude)-mod
-    test_data = amplitude[:size].reshape(-1,60)
+    mod = len(amplitude) % 60
+    size = len(amplitude) - mod
+    test_data = amplitude[:size].reshape(-1, 60)
     model = TransAm().to(device)
     model = torch.load('best_tst_model.pt')
     model.eval()
     for i in test_data:
-        df = pd.DataFrame(data={'ori':i}, columns=['ori'])
-        df.to_csv('model_ori.csv',mode='a',header=False)
+        df = pd.DataFrame(data={'ori': i}, columns=['ori'])
+        df.to_csv('model_ori.csv', mode='a', header=False)
     for i in test_data:
         data1 = np.resize(i, (60, 250))
         data2 = torch.from_numpy(data1).to(device).float()
         out = model(data2)
         out_cpu = out.cpu()
         out_npy = out_cpu.detach().numpy()
-        result = scaler.inverse_transform(out_npy[:,:,0])
-        df = pd.DataFrame(data={'result':result.reshape(-1)}, columns=['result'])
-        df.to_csv('model_result.csv',mode='a',header=False)
+        result = scaler.inverse_transform(out_npy[:, :, 0])
+        df = pd.DataFrame(data={'result': result.reshape(-1)}, columns=['result'])
+        df.to_csv('model_result.csv', mode='a', header=False)
 
 
 if __name__ == "__main__":

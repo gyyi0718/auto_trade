@@ -151,9 +151,9 @@ def train(train_data):
             print('| epoch {:3d} | {:5d}/{:5d} batches | '
                   'lr {:02.6f} | {:5.2f} ms | '
                   'loss {:5.5f} | ppl {:8.2f}'.format(
-                epoch, batch, len(train_data) // batch_size, scheduler.get_lr()[0],
-                              elapsed * 1000 / log_interval,
-                cur_loss, math.exp(cur_loss)))
+                    epoch, batch, len(train_data) // batch_size, scheduler.get_lr()[0],
+                                  elapsed * 1000 / log_interval,
+                    cur_loss, math.exp(cur_loss)))
             total_loss = 0
             start_time = time.time()
 
@@ -245,7 +245,7 @@ for epoch in range(1, epochs + 1):
 
     print('-' * 89)
     print('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.5f} | valid ppl {:8.2f}'.format(epoch, (
-                time.time() - epoch_start_time),
+            time.time() - epoch_start_time),
                                                                                                   val_loss,
                                                                                                   math.exp(val_loss)))
     print('-' * 89)

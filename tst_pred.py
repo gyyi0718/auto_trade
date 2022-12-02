@@ -5,6 +5,7 @@ import time
 import math
 from matplotlib import pyplot
 from pandas import read_csv
+
 torch.manual_seed(0)
 np.random.seed(0)
 
@@ -90,8 +91,8 @@ def create_inout_sequences(input_data, tw):
 def get_data_pred(path):
     from sklearn.preprocessing import MinMaxScaler
     series = read_csv(path, header=0, index_col=0, parse_dates=True, squeeze=True)
-    #series =series.drop('time',axis=0)
-    ori_data = np.array(series['open'],dtype=float)[-7200:]
+    # series =series.drop('time',axis=0)
+    ori_data = np.array(series['open'], dtype=float)[-7200:]
     # looks like normalizing input values curtial for the model
     scaler = MinMaxScaler(feature_range=(-1, 1))
     amplitude = scaler.fit_transform(ori_data.reshape(-1, 1)).reshape(-1)
@@ -99,7 +100,7 @@ def get_data_pred(path):
     # train_tensor = torch.FloatTensor(train_data).view(-1)
     # todo: add comment..
     data_sequence = create_inout_sequences(amplitude[-7200:], input_window)
-    return data_sequence.to(device), scaler,ori_data.reshape(-1, 1)[-7200:]
+    return data_sequence.to(device), scaler, ori_data.reshape(-1, 1)[-7200:]
 
 
 def get_batch(source, i, batch_size):
@@ -154,7 +155,7 @@ def plot_and_loss(eval_model, data_source, epoch):
 
     # test_result = test_result.cpu().numpy() -> no need to detach stuff..
     len(test_result)
-    pyplot.figure(figsize=(30,5))
+    pyplot.figure(figsize=(30, 5))
     pyplot.plot(test_result, color="red")
     pyplot.plot(truth[:500], color="blue")
     pyplot.plot(test_result - truth, color="green")
@@ -167,7 +168,7 @@ def plot_and_loss(eval_model, data_source, epoch):
 
 
 # predict the next n steps based on the input data
-def predict_future(eval_model, data_source, steps,ori):
+def predict_future(eval_model, data_source, steps, ori):
     eval_model.eval()
 
     total_loss = 0.
@@ -180,14 +181,14 @@ def predict_future(eval_model, data_source, steps,ori):
             data = torch.cat((data, output[-1:]))
     data = data.cpu().view(-1)
 
-    data = scaler_var.inverse_transform(np.expand_dims(data.numpy(),axis=0))[0]
+    data = scaler_var.inverse_transform(np.expand_dims(data.numpy(), axis=0))[0]
     # I used this plot to visualize if the model pics up any long therm struccture within the data.
-    pyplot.figure(figsize=(20,5))
-    pyplot.plot(ori[:,0][:300], color="green")
-    pyplot.plot(data, color="red",alpha=0.5)
+    pyplot.figure(figsize=(20, 5))
+    pyplot.plot(ori[:, 0][:300], color="green")
+    pyplot.plot(data, color="red", alpha=0.5)
     pyplot.plot(data[:input_window], color="blue")
     pyplot.grid(True, which='both')
-    #pyplot.axhline(y=0, color='k')
+    # pyplot.axhline(y=0, color='k')
     pyplot.savefig('graph/pred_future_%04d.png' % steps)
     pyplot.close()
 
@@ -204,7 +205,7 @@ def evaluate(eval_model, data_source):
     return total_loss / len(data_source)
 
 
-val_data,scaler_var,ori = get_data_pred('./b_minute_221127.csv')
+val_data, scaler_var, ori = get_data_pred('./b_minute_221127.csv')
 model = TransAm().to(device)
 
 pyplot.figure(figsize=(20, 5))
@@ -219,5 +220,4 @@ optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
 scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.95)
 
 model = torch.load('b_221127_2.pt')
-predict_future(model, val_data,300,ori)
-
+predict_future(model, val_data, 300, ori)
