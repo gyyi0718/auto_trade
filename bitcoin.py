@@ -1,19 +1,49 @@
-import datetime
+import os.path
 import pandas as pd
+import datetime
+from datetime import timedelta
+from keras.layers import LSTM, Dense, Dropout
 import numpy as np
-from sklearn.preprocessing import MinMaxScaler, Normalizer, MaxAbsScaler
+from sklearn.preprocessing import MinMaxScaler, Normalizer, MaxAbsScaler,StandardScaler,RobustScaler
 import tensorflow as tf
 import math
-from datetime import date, timedelta
+from keras.losses import Huber
 from keras.optimizers import SGD, Adam
 import time
 from typing import Union, Optional, List, Dict
 from pickle import dump, load
 import matplotlib.pyplot as plt
-
+from keras.models import Sequential
+from keras.layers import GRU, Dense
+from keras.callbacks import LambdaCallback
 
 today = datetime.datetime.today().strftime('%y%m%d')
 Timestamp = Union[datetime.datetime, datetime.date, int, float]
+
+# Set up the API endpoint URL
+URL = "https://api.binance.com/api/v3/klines"
+
+# Define the symbol and interval
+symbol = "ETHUSDT"
+interval = "1m"
+
+# Calculate the start and end dates
+end_date = datetime.datetime.today() - timedelta(days=1)
+start_date = end_date - timedelta(days=365)
+
+# Convert start and end dates to Unix timestamps
+start_ts = int(time.mktime(start_date.timetuple())) * 1000
+end_ts = int(time.mktime(end_date.timetuple())) * 1000
+
+# Define the parameters for the API request
+params = {
+    "symbol": symbol,
+    "interval": interval,
+    "startTime": start_ts,
+    "endTime": end_ts,
+    "limit": 10000
+}
+
 def _format_timestamp(timestamp: Timestamp) -> int:
     """
     Format the timestamp depending on its type and return
@@ -44,11 +74,10 @@ def read_json_data(path):
 
     return new_df
 
-def read_csv_data(path):
+def read_train_csv_data(path):
     train_path = path
     train = pd.read_csv(train_path)
-    df = pd.DataFrame(data = {'high':train['high'],'low':train['low'],'open':train['open']}, columns = ['high','low','open'])
-
+    df = pd.DataFrame(data = {'high':train['high'],'low':train['low'],'open':train['open'],'close':train['close']}, columns = ['high','low','open','close'])
     return df
 
 
@@ -58,7 +87,7 @@ def split_data(df,num):
     x_ = pd.DataFrame(df.iloc[0])
     y_ = pd.DataFrame(df.iloc[num])
     #for i in range(len(df)):
-    for i in range(0,1000):
+    for i in range(0,len(df)):
         if i % num == 0 and i !=0:
             y_ = pd.concat([y_, df.iloc[i]],ignore_index=True,axis=1)
         elif i%num !=0 and i !=0:
@@ -68,6 +97,7 @@ def split_data(df,num):
 
 
 def temp_split_data(df, num):
+    new_df = df.copy()
     new_df = df.reset_index()
     y_cnt =len(new_df['index'] %num !=0)//num
     x_ = new_df[new_df['index'] %num !=0]
@@ -77,168 +107,200 @@ def temp_split_data(df, num):
 
     return x_arr.T,y_arr.T
 
+
+def temp_split_data2(df, num):
+    new_df = df.copy()
+    new_df = df.reset_index()
+    y_cnt =len(new_df['index'] %num !=0)//num
+    #x_ = new_df[new_df['index'] %num !=0]
+    x_ = new_df
+    y_ = new_df[new_df['index'] !=0][new_df['index'] % num==0]
+    x_arr = pd.DataFrame(data={'high':x_['high'],'low':x_['low'],'open':x_['open']}, columns=['high','low','open'])
+    y_arr = pd.DataFrame(data={'high':y_['high'],'low':y_['low'],'open':y_['open']}, columns=['high','low','open'])
+
+    return x_arr.T,y_arr.T
+
+def five_minutes_split_data(df, num):
+    new_df = df.reset_index()
+    y_train = []
+    x_high = np.zeros(0)
+    x_low = np.zeros(0)
+    x_open = np.zeros(0)
+    x_close = np.zeros(0)
+
+    for i in range(0, (len(df)-len(df)%6)-num):
+        x_high = np.concatenate((x_high, np.array(new_df['high'][i:i+num-1])),axis=0)
+        x_low = np.concatenate((x_low, np.array(new_df['low'][i:i+num-1])),axis=0)
+        x_open = np.concatenate((x_open, np.array(new_df['open'][i:i+num-1])),axis=0)
+        x_close = np.concatenate((x_close, np.array(new_df['close'][i:i+num-1])),axis=0)
+
+        y_train.append([new_df['high'][i + num], new_df['low'][i + num], new_df['open'][i + num], new_df['close'][i + num]])
+
+    y_ = np.array(y_train)
+    x_arr = pd.DataFrame(data={'high':x_high,'low':x_low,'open':x_open, 'close':x_close}, columns=['high','low','open','close'])
+    y_arr = pd.DataFrame(data={'high':y_[:,0],'low':y_[:,1],'open':y_[:,2]}, columns=['high','low','open','close'])
+
+    return x_arr.T,y_arr.T
+
+
+def five_minutes_split_class(df, num):
+    new_df = df.reset_index()
+    y_train = []
+    x_high = np.zeros(0)
+    x_low = np.zeros(0)
+    x_open = np.zeros(0)
+    x_close = np.zeros(0)
+
+    for i in range(0, (len(df)-len(df)%6)-num):
+        x_high = np.concatenate((x_high, np.array(new_df['high'][i:i+num-1])),axis=0)
+        x_low = np.concatenate((x_low, np.array(new_df['low'][i:i+num-1])),axis=0)
+        x_open = np.concatenate((x_open, np.array(new_df['open'][i:i+num-1])),axis=0)
+        x_close = np.concatenate((x_close, np.array(new_df['close'][i:i+num-1])),axis=0)
+
+        y_train.append([new_df['high'][i + num], new_df['low'][i + num], new_df['open'][i + num], new_df['close'][i + num]])
+
+    y_ = np.array(y_train)
+    x_arr = pd.DataFrame(data={'high':x_high,'low':x_low,'open':x_open, 'close':x_close}, columns=['high','low','open','close'])
+    y_arr = pd.DataFrame(data={'high':y_[:,0],'low':y_[:,1],'open':y_[:,2],'close':y_[:,3]}, columns=['high','low','open','close'])
+
+    return x_arr.T,y_arr.T
+
+def five_minutes_split_gpt_data(df, num):
+    # Reshape the input dataframe into a 3D array of shape (N, num, 4), where N is the number of 5-minute intervals in the data
+    data = df[['high', 'low', 'open', 'close']].values
+    n_intervals = data.shape[0] // num
+    data = data[:n_intervals*num].reshape(n_intervals, num, 4)
+
+    # Split the 3D array into two 2D arrays: one for X data and one for Y data
+    x_arr = data[:, :-1, :].reshape(n_intervals, -1)
+    y_arr = data[:, -1, :]
+
+    # Convert the 2D arrays to pandas DataFrames and transpose them
+    x_arr = pd.DataFrame(x_arr.T, columns=['high', 'low', 'open', 'close'])
+    y_arr = pd.DataFrame(y_arr.T, columns=['high', 'low', 'open', 'close'])
+
+    return x_arr, y_arr
+
 def normalization(data):
-    scaler = MinMaxScaler()
-    training_data = scaler.fit_transform(data)
+    scaler = MaxAbsScaler()
+    #scaler = StandardScaler()
+    scaler_fit = scaler.fit(data)
+    result = scaler_fit.transform(data)
+    return result, scaler
 
-    return training_data,scaler
 
 
-def model_layer(input_shape):
-    # h1 ~ h3은 히든 레이어, 층이 깊을 수록 정확도가 높아질 수 있음
-    # relu, tanh는 활성화 함수의 종류
-    inputs = tf.keras.Input(shape=(input_shape,3))
-    h1 = tf.keras.layers.Dense(32, activation='relu')(inputs)
-    h2 = tf.keras.layers.Dense(64, activation='tanh')(h1)
-    h3 = tf.keras.layers.Dense(128, activation='relu')(h2)
-    h4 = tf.keras.layers.Dense(128, activation='tanh')(h3)
-    h5 = tf.keras.layers.Dense(128, activation='relu')(h4)
+def gru_model(timesteps, input_dim, output_dim):
+    model = Sequential()
 
-    # 값을 0 ~ 1 사이로 표현할 경우 sigmoid 활성화 함수 활용
-    # 마지막 아웃풋 값은 1개여야 함
-    h6 = tf.keras.layers.Flatten()(h5)
-    h7 = tf.keras.layers.Dense(128, activation='relu')(h6)
-    h8 = tf.keras.layers.Dense(64, activation='tanh')(h7)
-    h9 = tf.keras.layers.Dense(32, activation='relu')(h8)
-    outputs = tf.keras.layers.Dense(3, activation='sigmoid')(h9)
+    # First GRU layer
+    model.add(GRU(units=64, activation='tanh', return_sequences=True, input_shape=(timesteps, input_dim)))
 
-    # 인풋, 아웃풋 설정을 대입하여 모델 생성
-    model = tf.keras.Model(inputs=inputs, outputs=outputs)
+    # Second GRU layer
+    model.add(GRU(units=32, activation='tanh', return_sequences=True))
+
+    # Third GRU layer
+    model.add(GRU(units=16, activation='tanh', return_sequences=False))
+
+    # Dense hidden layer
+    model.add(Dense(units=16, activation='relu'))
+
+    # Output layer
+    model.add(Dense(units=output_dim, activation='linear'))
+
+    # Compile the model
+    model.compile(loss='mse', optimizer=Adam(learning_rate=0.001), metrics=['mean_absolute_error'])
     return model
+
 
 def scaleDown(df, name, i):
     return round(df[name].iloc[i]/math.pow(10,len(str(int(df[name].iloc[i])))),3)
 
-def makeX(df, i):
-    tempX = []
-    tempX.append(df[1][i])
-    tempX.append(df[0][i])
 
-    return tempX
-
-def classification_fun():
-    train_path = 'D:/ygy_work/coin/bitcoin.json'
-    df = read_json_data(train_path)
-    normal_df,scaler = normalization(df)
-    model = model_layer(1)
-    model.compile(optimizer="adam", loss="binary_crossentropy", metrics=['accuracy'])
-
-    x = []
-    y = []
-    # 인풋/아웃풋 데이터 생성
-
-    x = np.array(normal_df[:, 1][:-7])
-    y = np.array(normal_df[:, 0][:-7])
-    test_x = np.array(normal_df[:, 1][-7:])
-    test_y = np.array(normal_df[:, 0][-7:])
-
-    fitInfo = model.fit(x, y, epochs=2000)
-    model.save('bitcoine_%s.h5'%today)
-    new_model = tf.keras.models.load_model('bitcoine_%s.h5'%today)
-    new_model.summary()
-
-    for i in range(len(test_x) - 1):
-        test_loss, test_acc = model.evaluate(test_x[i:i + 1], test_y[i:i + 1], verbose=2)
-        print("%d : test loss = %f, test acc = %f, [%f]" % (i, test_loss, test_acc, test_y[i:i + 1]))
+def print_epoch_stats(epoch, logs):
+    print('Epoch {}: loss = {:.2f}, mae = {:.2f}'.format(epoch, logs['loss'], logs['mean_absolute_error']))
 
 
-def make_hour_model():
-    train_path = 'D:/ygy_work/coin/bitcoin.csv'
-    df = read_csv_data(train_path)
-    num = 5
-    x_df, y_df = split_data(df,num)
 
+def make_minute_gru_model(train_path, model_path):
+    df = read_train_csv_data(train_path)
+    num = 31
+    x_df, y_df = five_minutes_split_class(df, num)
+    print('step1. split data')
     normal_x_df,x_scaler = normalization(x_df)
     normal_y_df,y_scaler = normalization(y_df)
 
-    temp_mod = int(normal_x_df.shape[0]) % (num-1)
-    x_train = normal_x_df[:len(normal_x_df)-temp_mod,].reshape(num-1,-1,3)
-    y_train = normal_y_df.reshape(-1,3)
+    print('step2. normalize data')
 
-    model = model_layer((num-1))
-    model.compile(loss='mean_squared_error',
-                  optimizer=Adam(learning_rate=0.001),
-                  metrics=['mse'])
-
-
-    x_ = x_train[:-(num-1)*10]
-    train_x = x_.reshape(-1,(num-1))
-    y_ = y_train[:-10]
-    test_x = x_[-(num-1)*10:]
-    test_x = test_x.reshape((num-1),-1)
-    test_y = y_[-10:]
-    model.summary()
-
-    train_history = model.fit(train_x, y_, epochs=1000, batch_size=10, validation_split=0.2, verbose=0)
-    model.save('bitcoine_hour_%s.h5'%today)
-    new_model = tf.keras.models.load_model('bitcoine_hour_%s.h5'%today)
-    new_model.summary()
-
-    start_date = date(2018, 1, 1)
-
-    print(test_y)
-    for i in range(len(test_y)):
-        xx = np.expand_dims(test_x[:,i],axis=0)
-        yy =np.expand_dims(test_y[i],axis=0)
-        test_loss, test_mse = new_model.evaluate(xx, yy,verbose=0)
-        eval_result  = new_model.evaluate(xx, yy,verbose=0)
-        result = new_model.predict(xx)
-        #print(eval_result)
-        print(result)
-
-        print("%d : test loss = %f, test mse = %f, prediction= [%f], TP = [%f]" % (i, test_loss, test_mse,result[0],test_y[i]))
-
-
-
-def make_minute_model():
-    train_path = 'bitcoin_minute_1126.csv'
-    df = read_csv_data(train_path)
-    num = 6
-
-    x_df, y_df = temp_split_data(df,num)
-
-    normal_x_df,x_scaler = normalization(x_df)
-    normal_y_df,y_scaler = normalization(y_df)
-
-    dump(x_scaler, open('./x_scaler.pkl', 'wb'))
-    dump(y_scaler, open('./y_scaler.pkl', 'wb'))
+    dump(x_scaler, open('./half_x_scaler.pkl', 'wb'))
+    dump(y_scaler, open('./half_y_scaler.pkl', 'wb'))
 
 
     n_x_df = np.swapaxes(normal_x_df,0,1)
     n_y_df = np.swapaxes(normal_y_df,0,1)
 
     temp_mod = int(n_x_df.shape[0]) % (num-1)
-    x_train = np.swapaxes(n_x_df[:len(n_x_df)-temp_mod,].reshape(num-1,-1,3),0,1)
-    y_train = n_y_df.reshape(-1,3)[:x_train.shape[0]]
+    x_train = np.swapaxes(n_x_df[:len(n_x_df)-temp_mod,].reshape(num-1,-1,4),0,1)
+    y_train = n_y_df.reshape(-1,4)[:x_train.shape[0]]
 
     if len(x_train) != len(y_train):
         if len(x_train) > len(y_train):
             x_train = x_train[:len(y_train),]
         else:
             y_train = y_train[:len(x_train), ]
-    model = model_layer(num-1)
-    model = model_layer(num-1)
-    model.compile(loss='mean_squared_error',
-                  optimizer=Adam(learning_rate=0.001),
-                  metrics=['mse'])
+    model = gru_model(len(x_train[9]),4,4)
+    print('step3. get gru model')
+
     model.summary()
-
     tb_callback = tf.keras.callbacks.TensorBoard(log_dir="./logs", histogram_freq=1)
-    train_history = model.fit(x_train, y_train, epochs=1000, batch_size=10, validation_split=0.2, verbose=0, callbacks=[tb_callback])
+    train_history = model.fit(x_train, y_train, epochs=1000, batch_size=128, validation_split=0.2, verbose=0, callbacks=[tb_callback,LambdaCallback(on_epoch_end=lambda epoch, logs: print_epoch_stats(epoch, logs))])
     print(train_history)
-    model.save('bitcoine_minute_1126.h5')
+    model.save(model_path)
+    print('step4. save model')
 
+
+
+def make_minute_gru_model2(train_path, model_path):
+    df = read_train_csv_data(train_path)
+    num = 31
+    x_df, y_df = five_minutes_split_class(df, num)
+    print('step1. split data')
+
+    print('step2. make data')
+
+
+    n_x_df = np.swapaxes(x_df,0,1)
+    n_y_df = np.swapaxes(y_df,0,1)
+
+    temp_mod = int(n_x_df.shape[0]) % (num-1)
+    x_train = np.swapaxes(n_x_df[:len(n_x_df)-temp_mod,].reshape(num-1,-1,4),0,1)
+    y_train = n_y_df.reshape(-1,4)[:x_train.shape[0]]
+
+    if len(x_train) != len(y_train):
+        if len(x_train) > len(y_train):
+            x_train = x_train[:len(y_train),]
+        else:
+            y_train = y_train[:len(x_train), ]
+    model = gru_model(len(x_train[9]),4,4)
+    print('step3. get gru model')
+
+    model.summary()
+    tb_callback = tf.keras.callbacks.TensorBoard(log_dir="./logs", histogram_freq=1)
+    train_history = model.fit(x_train, y_train, epochs=1000, batch_size=128, validation_split=0.2, verbose=0, callbacks=[tb_callback,LambdaCallback(on_epoch_end=lambda epoch, logs: print_epoch_stats(epoch, logs))])
+    print(train_history)
+    model.save(model_path)
+    print('step4. save model')
 
 
 def get_date(data_path, num):
-    df = read_csv_data(data_path)
+    df = read_train_csv_data(data_path)
     x_df, y_df = split_data(df, num)
 
     normal_x_df, x_scaler = normalization(x_df)
     normal_y_df, y_scaler = normalization(y_df)
     temp_mod = int(normal_x_df.shape[0]) % (num - 1)
-    x_test = normal_x_df[:len(normal_x_df) - temp_mod, ].reshape(num - 1, -1, 3)
-    y_test = normal_y_df.reshape(-1, 3)
+    x_test = normal_x_df[:len(normal_x_df) - temp_mod, ].reshape(num - 1, -1, 4)
+    y_test = normal_y_df.reshape(-1, 4)
     if len(x_test[0]) < len(y_test):
         y_test = y_test[:len(x_test[0])]
     else :
@@ -246,12 +308,13 @@ def get_date(data_path, num):
 
     return x_test, y_test,x_df,y_df
 
+
+
+
 def predict_minute_model(train_path, model_path):
     x_test, y_test,x_ori, y_ori = get_date(train_path,6)
     model = tf.keras.models.load_model(model_path)
     model.summary()
-
-
 
     x_scaler = load(open('x_scaler.pkl', 'rb'))
     y_scaler = load(open('y_scaler.pkl', 'rb'))
@@ -259,44 +322,66 @@ def predict_minute_model(train_path, model_path):
     high_arr = []
     low_arr = []
     open_arr = []
+    close_arr = []
 
     high_arr_t = []
     low_arr_t = []
     open_arr_t = []
+    close_arr_t = []
 
     y_scaler.fit(y_ori)
     print(y_test)
+
+    df_col = ['p_high', 'p_low', 'p_open', 'p_close', 'TP_high', 'TP_low', 'TP_open', 'TP_close', 'diff_high',
+              'diff_low', 'diff_open', 'diff_close']
+    save_path = 'bit_pred_{}'.format(today)
     for i in range(len(y_test)):
         xx = np.expand_dims(x_test[:,i],axis=0)
         yy =np.expand_dims(y_test[i],axis=0)
         test_loss, test_mse = model.evaluate(xx, yy,verbose=0)
         pred = model.predict(xx)
         result = y_scaler.inverse_transform(pred)
+
         print("%d : test loss = %f, test mse = %f, prediction= [%f, %f, %f], TP = [%f, %f, %f]"
               % (i, test_loss, test_mse,result[0][0],result[0][1],result[0][2],y_ori['high'][i],y_ori['low'][i],y_ori['open'][i]))
+        print('test_loss={},test_mse={},prediction=[{},{},{},{}],TP=[{},{},{},{}]'.format(test_loss, test_mse,result[0][0],result[0][1],result[0][2],result[0][3], y_ori['high'][i],y_ori['low'][i],y_ori['open'][i],y_ori['close'][i]))
         high_arr.append(result[0][0])
         low_arr.append(result[0][1])
         open_arr.append(result[0][2])
+        close_arr.append(result[0][3])
 
         high_arr_t.append(y_ori['high'][i])
         low_arr_t.append(y_ori['low'][i])
         open_arr_t.append(y_ori['open'][i])
+        close_arr_t.append(y_ori['close'][i])
+        result_data = {'p_high': result[0][0], 'p_low': result[0][1], 'p_open':result[0][2], 'p_close':result[0][3],
+                     'TP_high': y_ori['high'][i], 'TP_low': y_ori['low'][i], 'TP_open':y_ori['open'][i], 'TP_close':y_ori['close'][i],
+                     'diff_high':  float(y_ori['high'][i])-float(result[0][0]), 'diff_low': float(y_ori['low'][i])-float(result[0][1]),
+                     'diff_open': float(y_ori['open'][i])-float(result[0][2]), 'diff_close': float(y_ori['close'][i])-float(result[0][3])
+                     }
+        result_df = pd.DataFrame(data=result_data,columns=df_col, index=[0])
 
-    plt.figure(figsize=(20,5))
-    plt.plot(high_arr, color='r')
-    plt.plot(high_arr_t, color='magenta',linestyle='dashed',alpha=0.5)
+        if not os.path.isfile(save_path):
+            result_df.to_csv(save_path, mode='w', sep=',', index=False, header=True)
+        else :
+            result_df.to_csv(save_path, mode='a', sep=',', index=False, header=False)
 
-    plt.plot(low_arr, color='g')
-    plt.plot(low_arr_t, color='limegreen',linestyle='dashed',alpha=0.5)
 
-    plt.plot(open_arr, color='b')
-    plt.plot(open_arr_t, color='aqua',linestyle='dashed',alpha=0.5)
 
-    plt.savefig('predict.png')
+def pre_make_deep_model_230307():
+    train_path = "ETH_price_minute_small_230307.csv"
+    #df = read_csv_data(train_path)
+    #five_minutes_split_data(df, 6)
+    #make_minute_model()
+    model_path ='bitcoine_minute[open]_221128.h5'
+    #make_minute_gru_model(train_path, model_path)
+
+    test_path = 'ETH_price_minute_test_230308.csv'
+    #model_path ='ETH_230307_half_minutes.h5'
+    model_path ='eth_minute_0305.h5'
+
+    predict_minute_model(test_path, model_path)
 
 
 if __name__ == "__main__":
-    #make_minute_model()
-    train_path = 'bitcoin_minute_221127_USD.csv'
-    model_path ='bitcoine_minute_1126.h5'
-    predict_minute_model(train_path, model_path)
+    pre_make_deep_model_230307()
