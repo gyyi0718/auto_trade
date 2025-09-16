@@ -47,7 +47,7 @@ INTERVAL   = "1"        # 1m
 
 # UTC 기준 기간
 today = datetime.utcnow()
-start_date = today - timedelta(days=60)
+start_date = today - timedelta(days=720)
 START_UTC = start_date.strftime("%Y-%m-%d %H:%M:%S")
 END_UTC   = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
 

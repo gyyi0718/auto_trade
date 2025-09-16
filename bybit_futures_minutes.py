@@ -29,7 +29,7 @@ SYMBOLS = [
 INTERVAL = "1"   # 1m
 CATEGORY = "linear"  # Bybit Futures USDT Perpetual
 today = datetime.utcnow()
-start_date = today - timedelta(days=60)
+start_date = today - timedelta(days=720)
 START = start_date.strftime("%Y-%m-%d %H:%M:%S")
 END   = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
 
