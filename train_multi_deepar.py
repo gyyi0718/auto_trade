@@ -31,18 +31,22 @@ from pytorch_forecasting.data import GroupNormalizer
 from datetime import datetime, timedelta
 
 # ====================== 사용자 설정 ======================
-SYMBOLS = [
+SYMBOLS2 = [
     "ETHUSDT","BTCUSDT","SOLUSDT","XRPUSDT","DOGEUSDT",
     "BNBUSDT","ADAUSDT","LINKUSDT","UNIUSDT","TRXUSDT",
     "LTCUSDT","MNTUSDT","SUIUSDT","1000PEPEUSDT",
     "XLMUSDT","ARBUSDT","APTUSDT","OPUSDT","AVAXUSDT"
+]
+
+SYMBOLS = [
+    "ETHUSDT"
 ]
 CATEGORY   = "linear"   # Bybit USDT-Perp
 INTERVAL   = "1"        # 1m
 # UTC 기준 기간 지정
 
 today = datetime.utcnow()
-start_date = today - timedelta(days=180)
+start_date = today - timedelta(days=720)
 START_UTC = start_date.strftime("%Y-%m-%d %H:%M:%S")
 END_UTC    = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
 
