@@ -20,13 +20,15 @@ SYMBOLS = [
     "ETHUSDT","BTCUSDT","SOLUSDT","XRPUSDT","DOGEUSDT",
     "BNBUSDT","ADAUSDT","LINKUSDT","UNIUSDT","TRXUSDT",
     "LTCUSDT","MNTUSDT","SUIUSDT","1000PEPEUSDT",
-    "XLMUSDT","ARBUSDT","APTUSDT","OPUSDT","AVAXUSDT"
+    "XLMUSDT","ARBUSDT","APTUSDT","OPUSDT","AVAXUSDT",
+    "ASTERUSDT","AIAUSDT","0GUSDT","STBLUSDT","WLFIUSDT","LINEAUSDT","AVMTUSDT","BARDUSDT","SOMIUSDT"
+
 ]
 
 INTERVAL = "1"   # 1m
 CATEGORY = "linear"  # Bybit Futures USDT Perpetual
 today = datetime.utcnow()
-start_date = today - timedelta(days=720)
+start_date = today - timedelta(days=1000)
 START = start_date.strftime("%Y-%m-%d %H:%M:%S")
 END   = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
 

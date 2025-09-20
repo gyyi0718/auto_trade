@@ -32,10 +32,8 @@ from pytorch_forecasting.data import GroupNormalizer
 
 # ====================== 사용자 설정 ======================
 SYMBOLS = [
-    "ETHUSDT","BTCUSDT","SOLUSDT","XRPUSDT","DOGEUSDT",
-    "BNBUSDT","ADAUSDT","LINKUSDT","UNIUSDT","TRXUSDT",
-    "LTCUSDT","MNTUSDT","SUIUSDT","1000PEPEUSDT",
-    "XLMUSDT","ARBUSDT","APTUSDT","OPUSDT","AVAXUSDT"
+    "ETHUSDT","BTCUSDT","SOLUSDT","XRPUSDT"
+
 ]
 
 
