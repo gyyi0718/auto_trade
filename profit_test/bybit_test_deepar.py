@@ -18,6 +18,12 @@ INTERVAL = "1"  # 1m
 SYMBOLS = os.getenv("SYMBOLS","ASTERUSDT,AIAUSDT,0GUSDT,STBLUSDT,WLFIUSDT,LINEAUSDT,BARDUSDT,SOMIUSDT,UBUSDT,OPENUSDT").split(",")
 
 ENTRY_MODE = os.getenv("ENTRY_MODE", "model")  # model|inverse|random
+# === [ADD] ENV ===
+MODEL_MODE = os.getenv("MODEL_MODE", "online").lower()   # fixed | online
+ONLINE_LR  = float(os.getenv("ONLINE_LR", "0.05"))      # SGD step
+ONLINE_DECAY = float(os.getenv("ONLINE_DECAY", "0.97")) # 버퍼 감쇠
+ONLINE_MAXBUF = int(os.getenv("ONLINE_MAXBUF", "240"))  # 최근 240분
+
 START_EQUITY = float(os.getenv("START_EQUITY","1000.0"))
 LEVERAGE = float(os.getenv("LEVERAGE","20"))
 ENTRY_EQUITY_PCT = float(os.getenv("ENTRY_EQUITY_PCT","0.20"))
@@ -83,6 +89,38 @@ SESSION_TRADES = 0
 # ===== MARKET (public only) =====
 TESTNET = str(os.getenv("BYBIT_TESTNET","0")).lower() in ("1","true","y","yes")
 mkt = HTTP(testnet=TESTNET, timeout=10, recv_window=5000)
+
+
+# === [ADD] 온라인 어댑터 ===
+class OnlineAdapter:
+    """μ' = a*μ + b 를 온라인으로 추정 (가벼운 보정층)"""
+    def __init__(self, lr=0.05, decay=0.97, maxbuf=240):
+        self.a, self.b = 1.0, 0.0
+        self.lr = lr
+        self.decay = decay
+        self.buf = collections.deque(maxlen=maxbuf)  # (mu, y)
+
+    def update(self, mu, y):
+        # 단순 MSE: e = (a*mu + b - y)
+        pred = self.a*mu + self.b
+        e = (pred - y)
+        # SGD step
+        self.a -= self.lr * e * mu
+        self.b -= self.lr * e
+        # 약간의 수축(드리프트 방지)
+        self.a = 0.999*self.a + 0.001*1.0
+        self.b = 0.999*self.b
+        # 버퍼(모니터 단계에서 실제 y로 누적)
+        self.buf.append((float(mu), float(y)))
+
+    def transform(self, mu):
+        return self.a*mu + self.b
+
+_ADAPTERS: Dict[str, OnlineAdapter] = collections.defaultdict(
+    lambda: OnlineAdapter(ONLINE_LR, ONLINE_DECAY, ONLINE_MAXBUF)
+)
+
+
 
 # ===== I/O =====
 def _ensure_csv():
@@ -245,6 +283,7 @@ def build_infer_dataset(df_sym: pd.DataFrame):
     )
 
 @torch.no_grad()
+@torch.no_grad()
 def deepar_direction(symbol: str):
     base = None
     try:
@@ -254,9 +293,17 @@ def deepar_direction(symbol: str):
                 tsd = build_infer_dataset(df)
                 dl = tsd.to_dataloader(train=False, batch_size=1, num_workers=0)
                 mu = float(DEEPar.predict(dl, mode="prediction")[0, 0])
-                if VERBOSE: print(f"[DEBUG] {symbol} mu={mu:.6g} thr={fee_threshold():.6g}")
-                if   mu >  fee_threshold(): base = "Buy"
-                elif mu < -fee_threshold(): base = "Sell"
+
+                # [ADD] 온라인 모드면 보정
+                if MODEL_MODE == "online":
+                    mu_adj = _ADAPTERS[symbol].transform(mu)
+                else:
+                    mu_adj = mu
+
+                thr = fee_threshold()
+                if VERBOSE: print(f"[DEBUG] {symbol} mu={mu:.6g} mu'={mu_adj:.6g} thr={thr:.6g}")
+                if   mu_adj >  thr: base = "Buy"
+                elif mu_adj < -thr: base = "Sell"
     except Exception as e:
         if VERBOSE: print(f"[PRED][ERR] {symbol} -> {e}")
 
@@ -466,7 +513,15 @@ def monitor_loop(poll_sec: float = 1.0, max_loops: int = 2):
                     st["sl"] = max(st["sl"], mark*(1.0 - TRAIL_BPS/10000.0))
                 else:
                     st["sl"] = min(st["sl"], mark*(1.0 + TRAIL_BPS/10000.0))
-
+            if MODEL_MODE == "online":
+                # 최근 2개의 종가로 1분 log-return 추정
+                df = get_recent_1m(sym, minutes=3)
+                if df is not None and len(df) >= 2:
+                    y = math.log(df["close"].iloc[-1] / max(1e-12, df["close"].iloc[-2]))
+                    # 직전 예측 μ는 deepar_direction 호출 시점의 그대로 쓰기 어려우므로
+                    # 간단히 현재 추정 μ로 대체(약식) — 안정성 위해 clip
+                    mu_est = max(min(0.01, (mark / entry - 1.0)), -0.01)
+                    _ADAPTERS[sym].update(mu_est, y)
             # 종료 조건(ABS/SL/Timeout) — 잔량 전량 종료
             if qty > 0:
                 pnl = unrealized_pnl_usd(side, qty, entry, mark)

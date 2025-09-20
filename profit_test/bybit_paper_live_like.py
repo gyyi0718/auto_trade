@@ -13,6 +13,14 @@ from typing import Optional, Dict, Tuple, List
 # ===== ENV =====
 CATEGORY = "linear"
 ENTRY_MODE = os.getenv("ENTRY_MODE","model")
+
+# === [ADD] ENV ===
+MODEL_MODE = os.getenv("MODEL_MODE","online").lower()     # fixed | online
+ONLINE_LR  = float(os.getenv("ONLINE_LR","0.05"))
+ONLINE_DECAY = float(os.getenv("ONLINE_DECAY","0.97"))
+ONLINE_MAXBUF = int(os.getenv("ONLINE_MAXBUF","240"))
+
+
 SYMBOLS = os.getenv("SYMBOLS","ASTERUSDT,AIAUSDT,0GUSDT,STBLUSDT,WLFIUSDT,LINEAUSDT,AVMTUSDT,BARDUSDT,SOMIUSDT,UBUSDT,OPENUSDT").split(",")
 
 START_EQUITY = float(os.getenv("START_EQUITY","1000.0"))
@@ -131,6 +139,29 @@ try:
 except Exception:
     DEEPar=None
 
+
+# === [ADD] 온라인 어댑터 ===
+import collections
+class OnlineAdapter:
+    def __init__(self, lr=0.05, decay=0.97, maxbuf=240):
+        self.a, self.b = 1.0, 0.0
+        self.lr, self.decay = lr, decay
+        self.buf = collections.deque(maxlen=maxbuf)
+    def update(self, mu, y):
+        pred = self.a*mu + self.b
+        e = pred - y
+        self.a -= self.lr * e * mu
+        self.b -= self.lr * e
+        self.a = 0.999*self.a + 0.001
+        self.b = 0.999*self.b
+        self.buf.append((float(mu), float(y)))
+    def transform(self, mu):
+        return self.a*mu + self.b
+
+_ADAPTERS: Dict[str, OnlineAdapter] = collections.defaultdict(
+    lambda: OnlineAdapter(ONLINE_LR, ONLINE_DECAY, ONLINE_MAXBUF)
+)
+
 def _fee_threshold(taker_fee=TAKER_FEE, slip_bps=SLIPPAGE_BPS_TAKER, safety=FEE_SAFETY):
     rt = 2.0*taker_fee + 2.0*(slip_bps/1e4)
     return math.log(1.0 + safety*rt)
@@ -176,8 +207,10 @@ def deepar_direction(symbol: str):
             tsd = _build_infer_dataset(df)
             dl  = tsd.to_dataloader(train=False, batch_size=1, num_workers=0)
             mu  = float(DEEPar.predict(dl, mode="prediction")[0, 0])
-            if   mu >  _THR: base="Buy"
-            elif mu < -_THR: base="Sell"
+            mu_adj = _ADAPTERS[symbol].transform(mu) if MODEL_MODE=="online" else mu
+            if   mu_adj >  _THR: base="Buy"
+            elif mu_adj < -_THR: base="Sell"
+
     if base is None:
         try:
             k=mkt.get_kline(category=CATEGORY, symbol=symbol, interval="1", limit=120)
@@ -369,7 +402,19 @@ def monitor_loop(poll_sec: float = 1.0):
                         new_sl = mark*(1.0 + TRAIL_BPS/10000.0)
                         p["sl"] = min(p["sl"], new_sl)
 
-                # SL/TP3 도달 → 잔량 전량 종료
+                if MODEL_MODE == "online":
+                    try:
+                        k = mkt.get_kline(category=CATEGORY, symbol=sym, interval="1", limit=2)
+                        rows = (k.get("result") or {}).get("list") or []
+                        if len(rows) >= 2:
+                            c0 = float(rows[-2][4]);
+                            c1 = float(rows[-1][4])
+                            y = math.log(c1 / max(1e-12, c0))  # 실제 1분 log-return
+                            # 약식 μ 추정: (mark/entry - 1)를 clip하여 업데이트(대략적인 μ)
+                            mu_est = max(min(0.01, (mark / entry - 1.0)), -0.01)
+                            _ADAPTERS[sym].update(mu_est, y)
+                    except Exception:
+                        pass
                 # SL/TP3 도달 → 잔량 전량 종료
                 if qty > 0:
                     # 추가: 절대익절(달러) 조건
