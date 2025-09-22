@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# PAPER 전용 (확장판): DeepAR ckpt 로드 → 방향 결정
+# PAPER 전용 (확장판): DeepAR 2개 ckpt 로드 → 두 모델 방향이 같을 때만 진입
 # 진입 필터(ROI/변동성/연속신호) + 타임아웃/동적 ABS_TP + TP1/TP2 분할, BE/트레일링, 쿨다운/세션 상한
 import os, time, math, csv, random, threading, collections
 from typing import Optional, Dict, Tuple, List
@@ -12,23 +12,20 @@ import warnings, logging
 warnings.filterwarnings("ignore", module="lightning")
 logging.getLogger("lightning.pytorch").setLevel(logging.ERROR)
 logging.getLogger("pytorch_lightning").setLevel(logging.ERROR)
+
 # ===== ENV =====
 CATEGORY = "linear"
 INTERVAL = "1"  # 1m
 
 import ctypes  # Windows ESC 폴링용
 
-# 전역
-STOP_FLAG = False
-
 def esc_pressed() -> bool:
-    # Windows: VK_ESCAPE = 0x1B
     try:
         return bool(ctypes.windll.user32.GetAsyncKeyState(0x1B) & 0x8000)
     except Exception:
         return False
 
-SYMBOLS = os.getenv("SYMBOLS","ASTERUSDT,AIAUSDT,0GUSDT,STBLUSDT,WLFIUSDT,LINEAUSDT,AVMTUSDT,BARDUSDT,SOMIUSDT,UBUSDT,OPENUSDT").split(",")
+SYMBOLS = os.getenv("SYMBOLS","ASTERUSDT,AIAUSDT,0GUSDT,STBLUSDT,WLFIUSDT,LINEAUSDT,BARDUSDT,SOMIUSDT,UBUSDT,OPENUSDT").split(",")
 SYMBOLS2 = [
     "ETHUSDT","BTCUSDT","SOLUSDT","XRPUSDT","DOGEUSDT",
     "BNBUSDT","ADAUSDT","LINKUSDT","UNIUSDT","TRXUSDT",
@@ -37,11 +34,12 @@ SYMBOLS2 = [
 ]
 
 ENTRY_MODE = os.getenv("ENTRY_MODE", "model")  # model|inverse|random
+
 # === [ADD] ENV ===
 MODEL_MODE = os.getenv("MODEL_MODE", "online").lower()   # fixed | online
-ONLINE_LR  = float(os.getenv("ONLINE_LR", "0.05"))      # SGD step
-ONLINE_DECAY = float(os.getenv("ONLINE_DECAY", "0.97")) # 버퍼 감쇠
-ONLINE_MAXBUF = int(os.getenv("ONLINE_MAXBUF", "240"))  # 최근 240분
+ONLINE_LR  = float(os.getenv("ONLINE_LR", "0.05"))
+ONLINE_DECAY = float(os.getenv("ONLINE_DECAY", "0.97"))
+ONLINE_MAXBUF = int(os.getenv("ONLINE_MAXBUF", "240"))
 
 START_EQUITY = float(os.getenv("START_EQUITY","1000.0"))
 LEVERAGE = float(os.getenv("LEVERAGE","20"))
@@ -62,8 +60,8 @@ TRAIL_BPS = float(os.getenv("TRAIL_BPS","50.0"))
 TRAIL_AFTER_TIER = int(os.getenv("TRAIL_AFTER_TIER","2"))  # 1: TP1후, 2: TP2후
 
 # --- 동적 ABS_TP(ATR 기반) ---
-ABS_TP_USD = float(os.getenv("ABS_TP_USD","0"))  # 0이면 동적 모드 사용
-ABS_K = float(os.getenv("ABS_K","1.0"))          # ABS_TP_USD = max(ABS_TP_USD_FLOOR, ABS_K * ATR_USD)
+ABS_TP_USD = float(os.getenv("ABS_TP_USD","0"))
+ABS_K = float(os.getenv("ABS_K","1.0"))
 ABS_TP_USD_FLOOR = float(os.getenv("ABS_TP_USD_FLOOR","5.0"))
 
 # --- 타임아웃(ATR) ---
@@ -77,9 +75,9 @@ _v = os.getenv("TIMEOUT_TARGET_BPS")
 TIMEOUT_TARGET_BPS = float(_v) if (_v is not None and _v.strip() != "") else None
 
 # --- 진입 품질 필터/세션 제한 ---
-MIN_EXPECTED_ROI_BPS = float(os.getenv("MIN_EXPECTED_ROI_BPS","30.0"))  # ROI 필터
-V_BPS_FLOOR = float(os.getenv("V_BPS_FLOOR","5.0"))                    # 변동성 하한(bps)
-N_CONSEC_SIGNALS = int(os.getenv("N_CONSEC_SIGNALS","2"))               # 연속 동일 방향 요구
+MIN_EXPECTED_ROI_BPS = float(os.getenv("MIN_EXPECTED_ROI_BPS","30.0"))
+V_BPS_FLOOR = float(os.getenv("V_BPS_FLOOR","5.0"))
+N_CONSEC_SIGNALS = int(os.getenv("N_CONSEC_SIGNALS","1"))
 COOLDOWN_SEC = int(os.getenv("COOLDOWN_SEC","30"))
 SESSION_MAX_TRADES = int(os.getenv("SESSION_MAX_TRADES","1000"))
 SESSION_MAX_MINUTES = int(os.getenv("SESSION_MAX_MINUTES","5"))
@@ -98,7 +96,7 @@ VERBOSE = str(os.getenv("VERBOSE","1")).lower() in ("1","y","yes","true")
 # ===== STATE =====
 _equity_cache = START_EQUITY
 POSITION_DEADLINE: Dict[str,int] = {}
-STATE: Dict[str,dict] = {}  # symbol -> tp/sl/flags/abs_usd 등
+STATE: Dict[str,dict] = {}
 ENTRY_LOCK = threading.Lock()
 ENTRY_HISTORY: Dict[str,collections.deque] = {s: collections.deque(maxlen=max(1,N_CONSEC_SIGNALS)) for s in SYMBOLS}
 COOLDOWN_UNTIL: Dict[str,float] = {}
@@ -109,37 +107,34 @@ SESSION_TRADES = 0
 TESTNET = str(os.getenv("BYBIT_TESTNET","0")).lower() in ("1","true","y","yes")
 mkt = HTTP(testnet=TESTNET, timeout=10, recv_window=5000)
 
-
 # === [ADD] 온라인 어댑터 ===
 class OnlineAdapter:
-    """μ' = a*μ + b 를 온라인으로 추정 (가벼운 보정층)"""
     def __init__(self, lr=0.05, decay=0.97, maxbuf=240):
         self.a, self.b = 1.0, 0.0
         self.lr = lr
         self.decay = decay
-        self.buf = collections.deque(maxlen=maxbuf)  # (mu, y)
-
+        self.buf = collections.deque(maxlen=maxbuf)
     def update(self, mu, y):
-        # 단순 MSE: e = (a*mu + b - y)
         pred = self.a*mu + self.b
         e = (pred - y)
-        # SGD step
         self.a -= self.lr * e * mu
         self.b -= self.lr * e
-        # 약간의 수축(드리프트 방지)
         self.a = 0.999*self.a + 0.001*1.0
         self.b = 0.999*self.b
-        # 버퍼(모니터 단계에서 실제 y로 누적)
         self.buf.append((float(mu), float(y)))
-
     def transform(self, mu):
         return self.a*mu + self.b
 
 _ADAPTERS: Dict[str, OnlineAdapter] = collections.defaultdict(
     lambda: OnlineAdapter(ONLINE_LR, ONLINE_DECAY, ONLINE_MAXBUF)
 )
-
-
+# === [NEW] 듀얼 어댑터 ===
+_ADAPTERS_MAIN: Dict[str, OnlineAdapter] = collections.defaultdict(
+    lambda: OnlineAdapter(ONLINE_LR, ONLINE_DECAY, ONLINE_MAXBUF)
+)
+_ADAPTERS_ALT: Dict[str, OnlineAdapter] = collections.defaultdict(
+    lambda: OnlineAdapter(ONLINE_LR, ONLINE_DECAY, ONLINE_MAXBUF)
+)
 
 # ===== I/O =====
 def _ensure_csv():
@@ -209,8 +204,8 @@ def recent_vol_bps(symbol: str, minutes: int = None) -> float:
 
 def fee_threshold(taker_fee=TAKER_FEE, slip_bps=SLIPPAGE_BPS_TAKER, safety=FEE_SAFETY):
     rt = 2.0*taker_fee + 2.0*(slip_bps/1e4)
-    return math.log(1.0 + safety*rt)
-
+    #return math.log(1.0 + safety*rt)
+    return 0.0005
 def tp_from_bps(entry: float, bps: float, side: str) -> float:
     return entry*(1.0 + bps/10000.0) if side=="Buy" else entry*(1.0 - bps/10000.0)
 
@@ -232,7 +227,7 @@ def calc_timeout_minutes(symbol: str) -> int:
     return int(min(max(need, TIMEOUT_MIN), TIMEOUT_MAX))
 
 def _dynamic_abs_tp_usd(symbol:str, mid:float, qty:float)->float:
-    if ABS_TP_USD > 0:  # 고정 ABS 설정 시 우선
+    if ABS_TP_USD > 0:
         return ABS_TP_USD
     v_bps = recent_vol_bps(symbol, VOL_WIN)
     atr_usd = (v_bps/1e4) * mid * qty
@@ -246,7 +241,12 @@ from pytorch_forecasting.metrics import NormalDistributionLoss
 
 SEQ_LEN = int(os.getenv("SEQ_LEN","240"))
 PRED_LEN = int(os.getenv("PRED_LEN","60"))
+
+# 기존 단일 모델(옵션)
 MODEL_CKPT = os.getenv("MODEL_CKPT","../multimodel/models/multi_deepar_best.ckpt")
+# === [NEW] 듀얼 모델 경로
+MODEL_CKPT_MAIN = os.getenv("MODEL_CKPT_MAIN","../multimodel/models/multi_deepar_best_main.ckpt")
+MODEL_CKPT_ALT  = os.getenv("MODEL_CKPT_ALT","../multimodel/models/multi_deepar_best_alt.ckpt")
 
 class SignAwareNormalLoss(NormalDistributionLoss):
     def __init__(self, reduction="mean", lambda_sign=0.3, alpha_sign=7.0):
@@ -268,10 +268,17 @@ class SignAwareNormalLoss(NormalDistributionLoss):
         return base + self.lambda_sign*bce
 
 DEEPar = None
+DEEPar_MAIN = None
+DEEPar_ALT  = None
 try:
     DEEPar = DeepAR.load_from_checkpoint(MODEL_CKPT, map_location="cpu").eval()
 except Exception as e:
     if VERBOSE: print(f"[WARN] DeepAR load failed: {e}")
+try:
+    DEEPar_MAIN = DeepAR.load_from_checkpoint(MODEL_CKPT_MAIN, map_location="cpu").eval()
+    DEEPar_ALT  = DeepAR.load_from_checkpoint(MODEL_CKPT_ALT,  map_location="cpu").eval()
+except Exception as e:
+    if VERBOSE: print(f"[WARN] Dual DeepAR load failed: {e}")
 
 def ma_side(symbol: str, minutes: int = 180) -> Optional[str]:
     df = get_recent_1m(symbol, minutes=minutes)
@@ -302,7 +309,6 @@ def build_infer_dataset(df_sym: pd.DataFrame):
     )
 
 @torch.no_grad()
-@torch.no_grad()
 def deepar_direction(symbol: str):
     base = None
     try:
@@ -312,13 +318,7 @@ def deepar_direction(symbol: str):
                 tsd = build_infer_dataset(df)
                 dl = tsd.to_dataloader(train=False, batch_size=1, num_workers=0)
                 mu = float(DEEPar.predict(dl, mode="prediction")[0, 0])
-
-                # [ADD] 온라인 모드면 보정
-                if MODEL_MODE == "online":
-                    mu_adj = _ADAPTERS[symbol].transform(mu)
-                else:
-                    mu_adj = mu
-
+                mu_adj = _ADAPTERS[symbol].transform(mu) if MODEL_MODE=="online" else mu
                 thr = fee_threshold()
                 if VERBOSE: print(f"[DEBUG] {symbol} mu={mu:.6g} mu'={mu_adj:.6g} thr={thr:.6g}")
                 if   mu_adj >  thr: base = "Buy"
@@ -326,11 +326,9 @@ def deepar_direction(symbol: str):
     except Exception as e:
         if VERBOSE: print(f"[PRED][ERR] {symbol} -> {e}")
 
-    # 모델이 애매/실패면 MA 백업
     if base is None:
         base = ma_side(symbol)
 
-    # 엔트리 모드 적용
     if ENTRY_MODE == "model":
         side = base
     elif ENTRY_MODE == "inverse":
@@ -338,7 +336,78 @@ def deepar_direction(symbol: str):
         elif base == "Sell": side = "Buy"
         else: side = None
     elif ENTRY_MODE == "random":
-        side = base or random.choice(["Buy","Sell"])   # 모델 None이면 랜덤 허용
+        side = base or random.choice(["Buy","Sell"])
+    else:
+        side = base
+    conf = 1.0 if side is not None else 0.0
+    return side, conf
+
+
+
+
+# === [NEW] 듀얼 모델 합의 방향
+@torch.no_grad()
+def dual_deepar_direction(symbol: str):
+    """
+    듀얼 DeepAR 합의 방향.
+    - THR_MODE=fixed|fee (기본 fixed)
+      * fixed: MODEL_THR_BPS(기본 5 bps)
+      * fee  : fee_threshold() 사용
+    - DUAL_RULE=loose|strict (기본 loose)
+      * loose : 부호 같고 둘 중 하나라도 |mu|>=thr
+      * strict: 부호 같고 두 개 모두 |mu|>=thr
+    """
+    if (DEEPar_MAIN is None) or (DEEPar_ALT is None):
+        # 듀얼 미로딩 시 단일 로직으로 폴백
+        return deepar_direction(symbol)
+
+    try:
+        df = get_recent_1m(symbol, minutes=SEQ_LEN + PRED_LEN + 10)
+        if df is None or len(df) < (SEQ_LEN + 1):
+            return (None, 0.0)
+
+        tsd = build_infer_dataset(df)
+        dl = tsd.to_dataloader(train=False, batch_size=1, num_workers=0)
+
+        mu1 = float(DEEPar_MAIN.predict(dl, mode="prediction")[0, 0])
+        mu2 = float(DEEPar_ALT.predict(dl,  mode="prediction")[0, 0])
+
+        mu1a = _ADAPTERS_MAIN[symbol].transform(mu1) if MODEL_MODE == "online" else mu1
+        mu2a = _ADAPTERS_ALT[symbol].transform(mu2)  if MODEL_MODE == "online" else mu2
+
+        thr_mode = os.getenv("THR_MODE", "fixed").lower()
+        if thr_mode == "fee":
+            thr = fee_threshold()
+        else:
+            thr = float(os.getenv("MODEL_THR_BPS", "3")) / 1e4  # 5 bps 기본
+
+        rule = os.getenv("DUAL_RULE", "loose").lower()
+        same_sign = (mu1a > 0 and mu2a > 0) or (mu1a < 0 and mu2a < 0)
+        mag1 = abs(mu1a) >= thr
+        mag2 = abs(mu2a) >= thr
+
+        if VERBOSE:
+            print(f"[DEBUG2] {symbol} mu1={mu1:.6g}->{mu1a:.6g}  mu2={mu2:.6g}->{mu2a:.6g}  thr={thr:.6g} rule={rule}")
+
+        base = None
+        if same_sign:
+            if (rule == "strict" and (mag1 and mag2)) or (rule != "strict" and (mag1 or mag2)):
+                base = "Buy" if (mu1a + mu2a) > 0 else "Sell"
+
+    except Exception as e:
+        if VERBOSE:
+            print(f"[PRED2][ERR] {symbol} -> {e}")
+        base = None
+
+    # 듀얼 로드 상태에서는 합의 실패 시 진입 안 함
+    if ENTRY_MODE == "model":
+        side = base
+    elif ENTRY_MODE == "inverse":
+        if   base == "Buy": side = "Sell"
+        elif base == "Sell": side = "Buy"
+        else: side = None
+    elif ENTRY_MODE == "random":
+        side = base or random.choice(["Buy","Sell"])
     else:
         side = base
 
@@ -346,6 +415,8 @@ def deepar_direction(symbol: str):
     return side, conf
 
 def choose_entry(symbol: str):
+    if (DEEPar_MAIN is not None) and (DEEPar_ALT is not None):
+        return dual_deepar_direction(symbol)
     return deepar_direction(symbol)
 
 # ===== Paper Broker =====
@@ -355,7 +426,7 @@ def _round_down(x: float, step: float) -> float:
 
 class PaperBroker:
     def __init__(self):
-        self.pos: Dict[str,dict] = {}  # symbol -> {side, entry, qty, opened}
+        self.pos: Dict[str,dict] = {}
         self.qty_step = 0.001
         self.min_qty = 0.001
     def try_open(self, symbol: str, side: str, mid: float, ts: int):
@@ -395,13 +466,6 @@ def _entry_allowed_by_filters(symbol:str, side:str, entry_ref:float)->bool:
 
 # ===== Entry/Exit =====
 def try_enter(symbol: str):
-    """
-    한 종목에 대해 진입 시도:
-    - 세션 제한(횟수/시간) & 쿨다운 체크
-    - 모델(또는 백업 로직)로 방향 결정 → 연속 신호 확인
-    - 시세/ROI·변동성 필터 통과 시 포지션 오픈
-    - 타임아웃/TP·SL/ABS TP 상태(STATE) 초기화 + 로그
-    """
     global SESSION_START_TS, SESSION_TRADES
     # 세션 롤오버
     if time.time() - SESSION_START_TS >= SESSION_MAX_MINUTES * 60:
@@ -420,7 +484,6 @@ def try_enter(symbol: str):
         if VERBOSE: print("[SKIP] session time cap hit")
         return
 
-        return
     if COOLDOWN_UNTIL.get(symbol, 0.0) > time.time():
         return
 
@@ -428,18 +491,19 @@ def try_enter(symbol: str):
     if symbol in BROKER.positions():
         return
 
-    # 방향 결정
+    # 방향 결정(듀얼 합의 우선)
     side, conf = choose_entry(symbol)
     if side not in ("Buy", "Sell"):
         return
 
     # 연속 신호 조건
     dq = ENTRY_HISTORY[symbol]
+    need = max(1, N_CONSEC_SIGNALS)
     dq.append(side)
-    if len(dq) < N_CONSEC_SIGNALS or any(x != side for x in dq):
-        if VERBOSE: print(f"[SKIP] consec fail {symbol} need={N_CONSEC_SIGNALS} got={list(dq)}")
-        return
-
+    if need > 1:
+        if len(dq) < need or any(x != side for x in dq):
+            if VERBOSE: print(f"[SKIP] consec fail {symbol} need={need} got={list(dq)}")
+            return
     # 시세
     bid, ask, mid = get_quote(symbol)
     if mid <= 0:
@@ -478,7 +542,6 @@ def try_enter(symbol: str):
             "abs_usd": _dynamic_abs_tp_usd(symbol, mid, pos_qty)
         }
 
-        # 로그
         _log_trade({
             "ts": ts, "event": "ENTRY", "symbol": symbol, "side": side,
             "qty": f"{pos_qty:.8f}", "entry": f"{mid:.6f}", "exit": "",
@@ -521,7 +584,6 @@ def monitor_loop(poll_sec: float = 1.0, max_loops: int = 2):
 
             st = STATE.get(sym, None)
             if st is None:
-                # 복구(이상 시)
                 tp1 = tp_from_bps(entry, TP1_BPS, side)
                 tp2 = tp_from_bps(entry, TP2_BPS, side)
                 tp3 = tp_from_bps(entry, TP3_BPS, side)
@@ -531,7 +593,7 @@ def monitor_loop(poll_sec: float = 1.0, max_loops: int = 2):
                       "abs_usd": _dynamic_abs_tp_usd(sym, entry, qty)}
                 STATE[sym]=st
 
-            # TP1 fill (분할청산 시뮬: 부분 PnL 반영 + 잔량 감소)
+            # TP1 fill
             if (not st["tp1_filled"]) and ((mark>=st["tp1"] and side=="Buy") or (mark<=st["tp1"] and side=="Sell")):
                 part = qty*TP1_RATIO
                 apply_trade_pnl(side, entry, st["tp1"], part, taker_fee=TAKER_FEE)
@@ -543,7 +605,6 @@ def monitor_loop(poll_sec: float = 1.0, max_loops: int = 2):
 
             # TP2 fill
             if qty>0 and (not st["tp2_filled"]) and ((mark>=st["tp2"] and side=="Buy") or (mark<=st["tp2"] and side=="Sell")):
-                # 남은 잔량 기준 TP2_RATIO 만큼
                 remain_ratio = 1.0 - TP1_RATIO
                 part = min(qty, remain_ratio*TP2_RATIO)
                 apply_trade_pnl(side, entry, st["tp2"], part, taker_fee=TAKER_FEE)
@@ -568,16 +629,20 @@ def monitor_loop(poll_sec: float = 1.0, max_loops: int = 2):
                     st["sl"] = max(st["sl"], mark*(1.0 - TRAIL_BPS/10000.0))
                 else:
                     st["sl"] = min(st["sl"], mark*(1.0 + TRAIL_BPS/10000.0))
+
+            # 온라인 어댑터 업데이트
             if MODEL_MODE == "online":
-                # 최근 2개의 종가로 1분 log-return 추정
                 df = get_recent_1m(sym, minutes=3)
                 if df is not None and len(df) >= 2:
                     y = math.log(df["close"].iloc[-1] / max(1e-12, df["close"].iloc[-2]))
-                    # 직전 예측 μ는 deepar_direction 호출 시점의 그대로 쓰기 어려우므로
-                    # 간단히 현재 추정 μ로 대체(약식) — 안정성 위해 clip
                     mu_est = max(min(0.01, (mark / entry - 1.0)), -0.01)
-                    _ADAPTERS[sym].update(mu_est, y)
-            # 종료 조건(ABS/SL/Timeout) — 잔량 전량 종료
+                    if (DEEPar_MAIN is not None) and (DEEPar_ALT is not None):
+                        _ADAPTERS_MAIN[sym].update(mu_est, y)
+                        _ADAPTERS_ALT[sym].update(mu_est, y)
+                    else:
+                        _ADAPTERS[sym].update(mu_est, y)
+
+            # 종료 조건
             if qty > 0:
                 pnl = unrealized_pnl_usd(side, qty, entry, mark)
                 abs_hit = pnl >= st["abs_usd"]
@@ -597,14 +662,12 @@ def main():
     print(f"[START] PAPER EXTENDED | MODE={ENTRY_MODE} TESTNET={TESTNET}")
     _log_equity(get_wallet_equity())
     while True:
-        # 스캔
         if SCAN_PARALLEL:
             with ThreadPoolExecutor(max_workers=SCAN_WORKERS) as ex:
                 ex.map(try_enter, SYMBOLS)
         else:
             for s in SYMBOLS:
                 try_enter(s)
-        # 모니터 (짧게 여러번)
         monitor_loop(1.0, 2)
         time.sleep(0.5)
 

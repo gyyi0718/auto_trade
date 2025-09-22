@@ -22,7 +22,12 @@ ONLINE_MAXBUF = int(os.getenv("ONLINE_MAXBUF","240"))
 
 
 SYMBOLS = os.getenv("SYMBOLS","ASTERUSDT,AIAUSDT,0GUSDT,STBLUSDT,WLFIUSDT,LINEAUSDT,AVMTUSDT,BARDUSDT,SOMIUSDT,UBUSDT,OPENUSDT").split(",")
-
+SYMBOLS2 = [
+    "ETHUSDT","BTCUSDT","SOLUSDT","XRPUSDT","DOGEUSDT",
+    "BNBUSDT","ADAUSDT","LINKUSDT","UNIUSDT","TRXUSDT",
+    "LTCUSDT","MNTUSDT","SUIUSDT","1000PEPEUSDT",
+    "XLMUSDT","ARBUSDT","APTUSDT","OPUSDT","AVAXUSDT"
+]
 START_EQUITY = float(os.getenv("START_EQUITY","1000.0"))
 LEVERAGE = float(os.getenv("LEVERAGE","20"))
 ENTRY_EQUITY_PCT = float(os.getenv("ENTRY_EQUITY_PCT","0.20"))
@@ -129,7 +134,7 @@ from pytorch_forecasting import TimeSeriesDataSet, DeepAR
 from pytorch_forecasting.data import GroupNormalizer
 
 MODEL_CKPT = os.getenv("MODEL_CKPT","models/multi_deepar_best.ckpt")
-SEQ_LEN = int(os.getenv("SEQ_LEN","60"))
+SEQ_LEN = int(os.getenv("SEQ_LEN","240"))
 PRED_LEN= int(os.getenv("PRED_LEN","60"))
 FEE_SAFETY = float(os.getenv("FEE_SAFETY","1.20"))
 
