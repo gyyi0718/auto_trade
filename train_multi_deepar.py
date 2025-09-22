@@ -39,7 +39,8 @@ SYMBOLS2 = [
 ]
 
 SYMBOLS = [
-    "ETHUSDT"
+    "ASTERUSDT","AIAUSDT","0GUSDT","STBLUSDT","WLFIUSDT",
+    "LINEAUSDT","BARDUSDT","SOMIUSDT","UBUSDT","OPENUSDT"
 ]
 CATEGORY   = "linear"   # Bybit USDT-Perp
 INTERVAL   = "1"        # 1m

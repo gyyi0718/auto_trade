@@ -16,19 +16,22 @@ from datetime import datetime, timedelta
 # =====================
 # 설정
 # =====================
+# =====================
 SYMBOLS = [
     "ETHUSDT","BTCUSDT","SOLUSDT","XRPUSDT","DOGEUSDT",
     "BNBUSDT","ADAUSDT","LINKUSDT","UNIUSDT","TRXUSDT",
     "LTCUSDT","MNTUSDT","SUIUSDT","1000PEPEUSDT",
     "XLMUSDT","ARBUSDT","APTUSDT","OPUSDT","AVAXUSDT",
-    "ASTERUSDT","AIAUSDT","0GUSDT","STBLUSDT","WLFIUSDT","LINEAUSDT","AVMTUSDT","BARDUSDT","SOMIUSDT"
-
+    "SHIBUSDT","TONUSDT"
 ]
-
+SYMBOLS2 = [
+    "ASTERUSDT","AIAUSDT","0GUSDT","STBLUSDT","WLFIUSDT",
+    "LINEAUSDT","BARDUSDT","SOMIUSDT","UBUSDT","OPENUSDT"
+]
 INTERVAL = "1"   # 1m
 CATEGORY = "linear"  # Bybit Futures USDT Perpetual
 today = datetime.utcnow()
-start_date = today - timedelta(days=1000)
+start_date = today - timedelta(days=180)
 START = start_date.strftime("%Y-%m-%d %H:%M:%S")
 END   = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
 

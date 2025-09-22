@@ -31,24 +31,37 @@ from pytorch_forecasting.data import GroupNormalizer
 
 
 # ====================== 사용자 설정 ======================
-SYMBOLS = [
-    "ETHUSDT","BTCUSDT","SOLUSDT","XRPUSDT"
-
+SYMBOLS2 = ([
+    "ETHUSDT","BTCUSDT","SOLUSDT"])
+''',"XRPUSDT","DOGEUSDT",)
+    "BNBUSDT","ADAUSDT","LINKUSDT","UNIUSDT","TRXUSDT",
+    "LTCUSDT","MNTUSDT","SUIUSDT","1000PEPEUSDT",
+    "XLMUSDT","ARBUSDT","APTUSDT","OPUSDT","AVAXUSDT"
 ]
+'''
 
-
-
+SYMBOLS = [
+    "ETHUSDT","BTCUSDT","SOLUSDT","XRPUSDT","DOGEUSDT",
+    "BNBUSDT","ADAUSDT","LINKUSDT","UNIUSDT","TRXUSDT",
+    "LTCUSDT","MNTUSDT","SUIUSDT","1000PEPEUSDT",
+    "XLMUSDT","ARBUSDT","APTUSDT","OPUSDT","AVAXUSDT",
+    "SHIBUSDT","TONUSDT"
+]
+SYMBOLS2 = [
+    "ASTERUSDT","AIAUSDT","0GUSDT","STBLUSDT","WLFIUSDT",
+    "LINEAUSDT","AVMTUSDT","BARDUSDT","SOMIUSDT","UBUSDT","OPENUSDT"
+]
 CATEGORY   = "linear"   # Bybit USDT-Perp
 INTERVAL   = "1"        # 1m
 
 # UTC 기준 기간
 today = datetime.utcnow()
-start_date = today - timedelta(days=720)
+start_date = today - timedelta(days=30)
 START_UTC = start_date.strftime("%Y-%m-%d %H:%M:%S")
 END_UTC   = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
 
 # DeepAR 하이퍼
-SEQ_LEN    = int(os.getenv("SEQ_LEN", "60"))
+SEQ_LEN    = int(os.getenv("SEQ_LEN", "240"))
 PRED_LEN   = int(os.getenv("PRED_LEN","60"))
 MAX_EPOCHS = int(os.getenv("MAX_EPOCHS","100"))
 BATCH_SIZE = int(os.getenv("BATCH_SIZE","256"))
@@ -71,8 +84,8 @@ os.makedirs(DIR_MODELS, exist_ok=True)
 os.makedirs(DIR_LOGS, exist_ok=True)
 
 COMBINED_CSV   = os.path.join(DIR_DATA, "combined_1m.csv")
-BEST_CKPT_PATH = os.path.join(DIR_MODELS, "multi_deepar_best.ckpt")
-LIVE_CKPT_PATH = os.path.join(DIR_MODELS, "multi_deepar_model.ckpt")
+BEST_CKPT_PATH = os.path.join(DIR_MODELS, "multi_deepar_best_main.ckpt")
+LIVE_CKPT_PATH = os.path.join(DIR_MODELS, "multi_deepar_model_main.ckpt")
 
 # ====================== Bybit v5 ======================
 BASE_URL = "https://api.bybit.com/v5/market/kline"
