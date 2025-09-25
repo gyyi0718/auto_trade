@@ -17,21 +17,32 @@ from datetime import datetime, timedelta
 # 설정
 # =====================
 # =====================
+
+
 SYMBOLS = [
-    "ETHUSDT","BTCUSDT","SOLUSDT","XRPUSDT","DOGEUSDT",
-    "BNBUSDT","ADAUSDT","LINKUSDT","UNIUSDT","TRXUSDT",
-    "LTCUSDT","MNTUSDT","SUIUSDT","1000PEPEUSDT",
-    "XLMUSDT","ARBUSDT","APTUSDT","OPUSDT","AVAXUSDT",
-    "SHIBUSDT","TONUSDT"
-]
-SYMBOLS2 = [
-    "ASTERUSDT","AIAUSDT","0GUSDT","STBLUSDT","WLFIUSDT",
+    "HEMIUSDT","ASTERUSDT","AIAUSDT","0GUSDT","STBLUSDT","WLFIUSDT",
     "LINEAUSDT","BARDUSDT","SOMIUSDT","UBUSDT","OPENUSDT"
 ]
+
+SYMBOLS = [
+    "BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT",
+    "ADAUSDT","DOGEUSDT","AVAXUSDT","TRXUSDT","DOTUSDT",
+    "MATICUSDT","LTCUSDT","SHIBUSDT","LINKUSDT","BCHUSDT",
+    "XLMUSDT","ATOMUSDT","UNIUSDT","ICPUSDT","APTUSDT",
+    "NEARUSDT","ARBUSDT","OPUSDT","SUIUSDT","MNTUSDT",
+    "TONUSDT","FILUSDT","ETCUSDT","HBARUSDT","VETUSDT",
+    "ALGOUSDT","EGLDUSDT","INJUSDT","AAVEUSDT","STXUSDT",
+    "RUNEUSDT","FLOWUSDT","GRTUSDT","QNTUSDT","AXSUSDT",
+    "THETAUSDT","XTZUSDT","EOSUSDT","FTMUSDT","CHZUSDT",
+    "MKRUSDT","SNXUSDT","KAVAUSDT","NEOUSDT","ZECUSDT",
+    "DASHUSDT","CRVUSDT","COMPUSDT","ENJUSDT","GMTUSDT",
+    "PEPEUSDT","1000PEPEUSDT"  # 밈코인 중 대표
+]
+
 INTERVAL = "1"   # 1m
 CATEGORY = "linear"  # Bybit Futures USDT Perpetual
 today = datetime.utcnow()
-start_date = today - timedelta(days=180)
+start_date = today - timedelta(days=720)
 START = start_date.strftime("%Y-%m-%d %H:%M:%S")
 END   = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
 

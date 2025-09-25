@@ -14,6 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 CATEGORY = "linear"
 ENTRY_MODE = os.getenv("ENTRY_MODE","model").lower()          # model|inverse|random
 SYMBOLS = os.getenv("SYMBOLS","ASTERUSDT,AIAUSDT,0GUSDT,STBLUSDT,WLFIUSDT,LINEAUSDT,AVMTUSDT,BARDUSDT,SOMIUSDT,UBUSDT,OPENUSDT").split(",")
+SYMBOLS = os.getenv("SYMBOLS","AIAUSDT,0GUSDT,STBLUSDT,,LINEAUSDT,BARDUSDT,SOMIUSDT,UBUSDT,OPENUSDT").split(",")
 
 LEVERAGE = float(os.getenv("LEVERAGE","20"))
 ENTRY_EQUITY_PCT = float(os.getenv("ENTRY_EQUITY_PCT","0.20"))
