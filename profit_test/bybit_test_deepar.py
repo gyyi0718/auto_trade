@@ -28,7 +28,7 @@ def esc_pressed() -> bool:
     except Exception:
         return False
 
-SYMBOLS = os.getenv("SYMBOLS","ASTERUSDT,AIAUSDT,0GUSDT,STBLUSDT,WLFIUSDT,LINEAUSDT,AVMTUSDT,BARDUSDT,SOMIUSDT,UBUSDT,OPENUSDT").split(",")
+SYMBOLS = os.getenv("SYMBOLS","ASTERUSDT").split(",")
 SYMBOLS2 = [
     "ETHUSDT","BTCUSDT","SOLUSDT","XRPUSDT","DOGEUSDT",
     "BNBUSDT","ADAUSDT","LINKUSDT","UNIUSDT","TRXUSDT",
@@ -246,7 +246,7 @@ from pytorch_forecasting.metrics import NormalDistributionLoss
 
 SEQ_LEN = int(os.getenv("SEQ_LEN","240"))
 PRED_LEN = int(os.getenv("PRED_LEN","60"))
-MODEL_CKPT = os.getenv("MODEL_CKPT","../multimodel/models/multi_deepar_best.ckpt")
+MODEL_CKPT = os.getenv("MODEL_CKPT","../multimodel/models/multi_deepar_best_alt.ckpt")
 
 class SignAwareNormalLoss(NormalDistributionLoss):
     def __init__(self, reduction="mean", lambda_sign=0.3, alpha_sign=7.0):
