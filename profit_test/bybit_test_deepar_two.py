@@ -20,7 +20,7 @@ logging.getLogger("pytorch_lightning").setLevel(logging.ERROR)
 CATEGORY = "linear"
 INTERVAL = "1"  # 1m
 
-SYMBOLS = os.getenv("SYMBOLS","BARDUSDT").split(",")
+SYMBOLS = os.getenv("SYMBOLS","ASTERUSDT").split(",")
 #SYMBOLS = os.getenv("SYMBOLS","ASTERUSDT,AIAUSDT,0GUSDT,STBLUSDT,LINEAUSDT,BARDUSDT,SOMIUSDT,UBUSDT,OPENUSDT").split(",")
 
 TIMEOUT_MODE = os.getenv("TIMEOUT_MODE", "atr")  # fixed | atr | model
@@ -477,7 +477,7 @@ def deepar_direction(symbol: str):
 # ===== TCN (binary-threshold driver) =====
 import torch.nn as nn
 
-TCN_CKPT = os.getenv("TCN_CKPT", "../multimodel/tcn_best.pt")
+TCN_CKPT = os.getenv("TCN_CKPT", "tcn_best.pt")
 TCN_FEATS = ["ret","rv","mom","vz"]
 TCN_SEQ_LEN_FALLBACK = 240
 

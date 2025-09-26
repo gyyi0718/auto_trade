@@ -274,7 +274,7 @@ def deepar_time_to_target_minutes(symbol: str, side: str, target_bps: float) -> 
     return int(hit_idx + 1)
 
 # ===== TCN (binary) =====
-TCN_CKPT = os.getenv("TCN_CKPT", "../multimodel/tcn_best.pt")
+TCN_CKPT = os.getenv("TCN_CKPT", "tcn_best.pt")
 TCN_FEATS = ["ret","rv","mom","vz"]
 TCN_SEQ_LEN_FALLBACK = 240
 
