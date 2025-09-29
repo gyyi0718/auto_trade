@@ -10,6 +10,7 @@ transformer-gif
 *.csv
 *.png
 *.jpg
+<<<<<<< HEAD
 *.bmp
 =======
 *.h5
@@ -21,3 +22,16 @@ transformer-gif
 *.csv
 ./idea/*
 ./graph/*
+=======
+*.bmpa
+*.ckpt
+*.parquet
+*.config
+logs/*
+models/*
+test/*
+lightning_logs/*
+data/*
+data_upbit/*
+ckpt/*
+>>>>>>> live_trade

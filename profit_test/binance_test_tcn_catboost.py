@@ -1,15 +1,15 @@
 # -*- coding: utf-8 -*-
-# PAPER: TCN + CatBoost 조합 (DeepAR 제거)
+# PAPER: TCN + CatBoost 조합 (Binance USDT-M 선물 시세로 페이퍼 테스트)
 import os, time, math, csv, random, threading, collections
 from typing import Optional, Dict, Tuple, List
 import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
-from pybit.unified_trading import HTTP
 from concurrent.futures import ThreadPoolExecutor
-import certifi, json
+import certifi, json, requests
 
+# ====== TLS certs (윈도우 이슈 방지) ======
 os.environ["SSL_CERT_FILE"] = certifi.where()
 os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
 
@@ -20,12 +20,15 @@ logging.getLogger("pytorch_lightning").setLevel(logging.ERROR)
 
 # ===== ENV =====
 CATEGORY = "linear"
-INTERVAL = "1"  # 1m
+INTERVAL = os.getenv("INTERVAL", "1")  # "1" (분) → 바이낸스 "1m"로 매핑
+def _bx_interval(s: str) -> str:
+    s = str(s).strip().lower()
+    if s.endswith("m"): return s
+    return f"{s}m"
 
-SYMBOLS = os.getenv("SYMBOLS","ASTERUSDT,AIAUSDT,0GUSDT,STBLUSDT,LINEAUSDT,BARDUSDT,SOMIUSDT,UBUSDT,OPENUSDT").split(",")
+SYMBOLS = os.getenv("SYMBOLS","ORDERUSDT,FORMUSDT,ASTERUSDT,AIAUSDT,0GUSDT,STBLUSDT,LINEAUSDT,BARDUSDT,SOMIUSDT,UBUSDT,OPENUSDT").split(",")
 DIAG = str(os.getenv("DIAG","0")).lower() in ("1","y","yes","true")
 TRACE = str(os.getenv("TRACE","1")).lower() in ("1","y","yes","true")
-
 
 TIMEOUT_MODE = os.getenv("TIMEOUT_MODE", "model")   # fixed|atr|model
 VOL_WIN = int(os.getenv("VOL_WIN", "60"))
@@ -96,10 +99,6 @@ COOLDOWN_UNTIL: Dict[str,float] = {}
 SESSION_START_TS = time.time()
 SESSION_TRADES = 0
 
-# ===== MARKET (public only) =====
-TESTNET = str(os.getenv("BYBIT_TESTNET","0")).lower() in ("1","true","y","yes")
-mkt = HTTP(testnet=TESTNET, timeout=10, recv_window=5000)
-
 # ==== PATCH: globals (paste near other globals) ====
 from collections import deque
 
@@ -124,12 +123,60 @@ RISK_CONSEC_LOSS = 0
 RISK_DAY_CUM_BPS = 0.0
 RISK_LAST_RESET_DAY = time.strftime("%Y-%m-%d")
 
+
+# =============================================================================
+# =============== Binance USDT-M Futures (PUBLIC-ONLY) 클라이언트 ============
+# =============================================================================
+BINANCE_TESTNET = str(os.getenv("BINANCE_TESTNET","0")).lower() in ("1","true","y","yes")
+class BinancePublicUM:
+    def __init__(self, testnet: bool = False, timeout: int = 10):
+        self.base = "https://testnet.binancefuture.com" if testnet else "https://fapi.binance.com"
+        self.s = requests.Session()
+        self.timeout = timeout
+        self.s.headers.update({"User-Agent": "paper-binance-tcn-catboost/1.0"})
+
+    def klines(self, symbol: str, interval: str = "1m", limit: int = 500):
+        try:
+            r = self.s.get(self.base + "/fapi/v1/klines",
+                           params={"symbol": symbol, "interval": interval, "limit": int(limit)},
+                           timeout=self.timeout)
+            if r.status_code != 200:
+                return None
+            return r.json()
+        except Exception:
+            return None
+
+    def book_ticker(self, symbol: str):
+        try:
+            r = self.s.get(self.base + "/fapi/v1/ticker/bookTicker",
+                           params={"symbol": symbol}, timeout=self.timeout)
+            if r.status_code != 200:
+                return None
+            return r.json()
+        except Exception:
+            return None
+
+    def ticker_price(self, symbol: str):
+        try:
+            r = self.s.get(self.base + "/fapi/v1/ticker/price",
+                           params={"symbol": symbol}, timeout=self.timeout)
+            if r.status_code != 200:
+                return None
+            return r.json()
+        except Exception:
+            return None
+
+# 인스턴스
+mkt = BinancePublicUM(testnet=BINANCE_TESTNET, timeout=10)
+
+# =============================================================================
+# ========================= 스캐너/진단 출력 헬퍼 =============================
+# =============================================================================
 def _scan_tick(symbol: str):
     now = time.time()
     fields = []
     reasons = []
 
-    # 포지션/쿨다운
     has_pos = symbol in BROKER.positions()
     cd_left = max(0, int(COOLDOWN_UNTIL.get(symbol,0.0) - now))
     fields.append(f"pos={int(has_pos)}")
@@ -161,10 +208,12 @@ def _scan_tick(symbol: str):
             fields.append(f"tcn_err={e}")
             reasons.append("TCN_ERR")
             t_side=None; mu=None; thr=_tcn_thr()
+
     cb_side, cb_conf = catboost_direction(symbol)
     fields.append(f"cb_side={cb_side} cb_conf={cb_conf:.2f}")
     if cb_side is None:
         reasons.append("CB_BLOCK")
+
     # 변동성 바닥
     v_bps = recent_vol_bps(symbol, VOL_WIN)
     vol_ok = v_bps >= V_BPS_FLOOR
@@ -192,46 +241,33 @@ def _scan_tick(symbol: str):
     verdict = "PASS" if not reasons else ("SKIP:" + ",".join(reasons))
     print(f"[SCAN] {symbol} | " + " | ".join(fields) + f" -> {verdict}")
 
-
 def _whynot(symbol: str):
     msgs = []
     now = time.time()
 
-    # 상태/쿨다운/포지션
     if COOLDOWN_UNTIL.get(symbol,0.0) > now:
         msgs.append(f"cooldown={int(COOLDOWN_UNTIL[symbol]-now)}s")
-    if symbol in BROKER.positions():
-        msgs.append("has_position=1")
-    else:
-        msgs.append("has_position=0")
+    msgs.append(f"has_position={int(symbol in BROKER.positions())}")
 
-    # META
     if META_ON:
         hit, mean_bps, mdd = _meta_stats(symbol)
         meta_block = META_BLOCK_UNTIL.get(symbol,0.0) > now
         ok = (hit >= META_MIN_HIT) and (mean_bps >= META_MIN_EVR) and (mdd > META_MAX_DD_BPS)
         msgs.append(f"meta_ok={int(ok)} hit={hit:.2f} evr={mean_bps:.1f} mdd={mdd:.1f} block={int(meta_block)}")
 
-    # TCN 신호
     try:
-        t_side, mu, thr, lg = tcn_direction(symbol)
+        t_side, mu, thr = tcn_direction(symbol)
         if TCN_MODEL is None:
             msgs.append("tcn=OFF")
         else:
-            if not 'TCN_HAS_MU' in globals() or not TCN_HAS_MU:
-                p = 1.0/(1.0+math.exp(-lg))
-                msgs.append(f"tcn_side={t_side} p={p:.3f} thrP={float(os.getenv('TCN_THR_PROB','0.48')):.2f}")
-            else:
-                msgs.append(f"tcn_side={t_side} mu={mu:.6g} thrMu={thr:.6g}")
+            msgs.append(f"tcn_side={t_side} mu={mu:.6g} thr={thr:.6g}")
     except Exception as e:
         msgs.append(f"tcn_err={e}")
 
-    # 변동성 바닥/ROI 필터
     bid, ask, mid = get_quote(symbol)
     v_bps = recent_vol_bps(symbol, VOL_WIN)
     msgs.append(f"vol={v_bps:.1f}bps floor={V_BPS_FLOOR:.1f} {'OK' if v_bps>=V_BPS_FLOOR else 'LOW'}")
 
-    # ROI 엣지(신호가 있어야 계산)
     side_for_edge = t_side if 't_side' in locals() else None
     entry_ref = float(ask if side_for_edge=='Buy' else (bid if side_for_edge=='Sell' else mid))
     if side_for_edge in ("Buy","Sell") and entry_ref>0:
@@ -240,54 +276,45 @@ def _whynot(symbol: str):
         need_bps = _entry_cost_bps() + _exit_cost_bps() + MIN_EXPECTED_ROI_BPS
         msgs.append(f"roi_edge={edge_bps:.1f} need={need_bps:.1f} {'OK' if edge_bps>=need_bps else 'LOW'}")
 
-    # 연속 신호 버퍼
     dq = ENTRY_HISTORY[symbol]; need = max(1, N_CONSEC_SIGNALS)
     msgs.append(f"consec_need={need} buf={list(dq)}")
 
     print("[WHYNOT]", symbol, " | ".join(msgs))
 
-
-def _bps(pnl_usd: float, notional_usd: float) -> float:
-    if notional_usd <= 0: return 0.0
-    return (pnl_usd / notional_usd) * 10_000.0
-
-def _meta_push(symbol: str, pnl_bps: float):
-    META_TRADES.setdefault(symbol, deque(maxlen=max(5, META_WIN))).append(float(pnl_bps))
-
-def _meta_stats(symbol: str) -> Tuple[float,float,float]:
-    arr = list(META_TRADES.get(symbol, []))
-    if not arr: return 1.0, 0.0, 0.0
-    n = len(arr)
-    hit = sum(1 for x in arr if x > 0) / n
-    mean = sum(arr)/n
-    peak = -1e18; mdd = 0.0; cum = 0.0
-    for x in arr:
-        cum += x
-        if cum > peak: peak = cum
-        mdd = min(mdd, cum - peak)
-    return hit, mean, mdd
-
-# ===== Market helpers =====
+# =============================================================================
+# =========================== 시세/지표 헬퍼 ==================================
+# =============================================================================
 def get_quote(symbol: str) -> Tuple[float,float,float]:
-    r = mkt.get_tickers(category=CATEGORY, symbol=symbol)
-    row = ((r.get("result") or {}).get("list") or [{}])[0]
-    bid = float(row.get("bid1Price") or 0.0)
-    ask = float(row.get("ask1Price") or 0.0)
-    last = float(row.get("lastPrice") or 0.0)
-    mid = (bid+ask)/2.0 if bid>0 and ask>0 else (last or bid or ask)
+    """
+    Binance USDT-M:
+      - /fapi/v1/ticker/bookTicker → bidPrice, askPrice
+      - /fapi/v1/ticker/price      → price (last)
+    """
+    bt = mkt.book_ticker(symbol)
+    bid = float((bt or {}).get("bidPrice") or 0.0)
+    ask = float((bt or {}).get("askPrice") or 0.0)
+    last = 0.0
+    tp = mkt.ticker_price(symbol)
+    if tp and tp.get("price") is not None:
+        try: last = float(tp["price"])
+        except Exception: last = 0.0
+    mid = (bid+ask)/2.0 if (bid>0 and ask>0) else (last or bid or ask)
     return bid, ask, float(mid or 0.0)
 
 def get_recent_1m(symbol: str, minutes: int = 200) -> Optional[pd.DataFrame]:
-    r = mkt.get_kline(category=CATEGORY, symbol=symbol, interval=INTERVAL, limit=min(minutes,1000))
-    rows = (r.get("result") or {}).get("list") or []
+    rows = mkt.klines(symbol, interval=_bx_interval(INTERVAL), limit=min(int(minutes), 1000))
     if not rows: return None
-    rows = rows[::-1]
-    df = pd.DataFrame([{
-        "timestamp": pd.to_datetime(int(z[0]), unit="ms", utc=True),
-        "open": float(z[1]), "high": float(z[2]), "low": float(z[3]),
-        "close": float(z[4]), "volume": float(z[5]), "turnover": float(z[6]),
-    } for z in rows])
-    return df
+    try:
+        df = pd.DataFrame([{
+            "timestamp": pd.to_datetime(int(z[0]), unit="ms", utc=True),
+            "open": float(z[1]), "high": float(z[2]), "low": float(z[3]),
+            "close": float(z[4]),
+            "volume": float(z[5]),
+            "turnover": float(z[7]) if len(z) > 7 and z[7] is not None else float(z[5]) * float(z[4]),
+        } for z in rows])
+        return df.sort_values("timestamp").reset_index(drop=True)
+    except Exception:
+        return None
 
 def recent_vol_bps(symbol: str, minutes: int = None) -> float:
     minutes = minutes or VOL_WIN
@@ -382,16 +409,14 @@ class TCNBinary(nn.Module):
             ch_in = hidden
         self.tcn = nn.Sequential(*layers)
         self.head = nn.Linear(hidden, head_out)  # 1 or 2
-
     def forward(self, x):
         x = x.transpose(1,2)
         h = self.tcn(x)[:, :, -1]
         o = self.head(h)
-        if self.head_out == 1:   # cls 체크포인트
+        if self.head_out == 1:
             return None, o.squeeze(-1)
-        else:                    # joint 체크포인트
+        else:
             return o[:,0], o[:,1]
-
 
 def _build_tcn_features(df: pd.DataFrame) -> pd.DataFrame:
     g = df.sort_values("timestamp").copy()
@@ -418,35 +443,28 @@ def _apply_tcn_scaler(X: np.ndarray, mu, sd):
     return (X - mu) / sd
 
 TCN_HAS_MU = False
-TCN_THR_PROB = float(os.getenv("TCN_THR_PROB","0.48"))  # cls 모드용 확률 임계
+TCN_THR_PROB = float(os.getenv("TCN_THR_PROB","0.48"))
 
 TCN_MODEL=None; TCN_CFG={}; TCN_MU=None; TCN_SD=None; TCN_SEQ_LEN=TCN_SEQ_LEN_FALLBACK
 try:
     ck = torch.load(TCN_CKPT, map_location="cpu")
     state = ck.get("model", ck)
-    # infer feats/seq_len
     TCN_CFG = ck.get("cfg", {})
     if "FEATS" in TCN_CFG: TCN_FEATS = TCN_CFG["FEATS"]
     TCN_SEQ_LEN = int(TCN_CFG.get("SEQ_LEN", TCN_SEQ_LEN_FALLBACK))
 
-    # infer hidden/levels/k/head_out from weights
-    # 첫 블록 conv1 가중치: [hidden, in_feat, k]
     k0 = next(k for k in state.keys() if k.endswith("tcn.0.conv1.weight_v") or k.endswith("tcn.0.conv1.weight"))
     w0 = state[k0]
     hidden = w0.shape[0]
     in_feat = w0.shape[1]
     k_size = w0.shape[2]
-    # 레벨 수
     levels = 1 + max(int(k.split('.')[1]) for k in state.keys() if k.startswith("tcn.") and ".conv1." in k)
-    # 헤드 출력 차원(1이면 cls, 2면 joint)
     head_w = state.get("head.weight")
     head_out = head_w.shape[0] if head_w is not None else 2
 
-    # 모델 구성 & 로드
     TCN_MODEL = TCNBinary(in_feat=in_feat, hidden=hidden, levels=levels, k=k_size,
                           dropout=0.1, head_out=head_out).eval()
     TCN_MODEL.load_state_dict(state, strict=True)
-    # 헤드 타입 감지: 1=cls, 2=reg(joint)
     try:
         TCN_HEAD = "cls" if TCN_MODEL.head.out_features == 1 else "reg"
     except Exception:
@@ -457,12 +475,10 @@ except Exception as e:
     print(f"[WARN] TCN load failed: {e}")
     TCN_MODEL=None
 
-
 def _tcn_thr():
     mode = os.getenv("THR_MODE", "fixed").lower()
     if mode == "fee" and TCN_HAS_MU:
         return float(fee_threshold())
-    # μ 임계(bps→ratio), cls모드에선 쓰지 않음
     return float(os.getenv("MODEL_THR_BPS", "5.0")) / 1e4
 
 @torch.no_grad()
@@ -481,17 +497,15 @@ def tcn_direction(symbol: str):
 
     y_hat, logit = TCN_MODEL(x_t)
 
-    # 분류 헤드: logit만 존재 → p로 결정
     if y_hat is None:
         p = float(torch.sigmoid(logit).item())
         prob_thr = float(os.getenv("LOGIT_PROB_THR", "0.42"))
         side = "Buy" if p > prob_thr else ("Sell" if p < (1.0 - prob_thr) else None)
-        score = p - 0.5                    # [-0.5, +0.5]로 신뢰도
-        thr = prob_thr - 0.5               # 임계치도 동일 스케일
+        score = p - 0.5
+        thr = prob_thr - 0.5
         if VERBOSE: print(f"[DEBUG][TCN][{symbol}] p={p:.3f} thr={prob_thr:.2f} -> {side}")
         return side, score, thr
 
-    # 회귀(또는 joint) 헤드: mu/threshold 사용
     mu = float(y_hat.item())
     thr = _tcn_thr()
     side = "Buy" if mu > thr else ("Sell" if mu < -thr else None)
@@ -500,7 +514,7 @@ def tcn_direction(symbol: str):
 
 @torch.no_grad()
 def tcn_time_to_target_minutes(symbol: str, side: str, target_bps: float):
-    if TCN_HEAD == "cls":   # 분류 모델은 시간산출 부적합 → ATR로 폴백하게 None
+    if TCN_HEAD == "cls":
         return None
     t_side, mu_t, _thr = tcn_direction(symbol)
     if mu_t is None: return None
@@ -529,7 +543,6 @@ except Exception as e:
     print(f"[WARN] CatBoost load failed: {e}")
 
 def _latest_base_feats(df: pd.DataFrame) -> Optional[dict]:
-    # 요구 최소 길이
     need = 120
     if df is None or len(df) < need: return None
     g = df.sort_values("timestamp").copy()
@@ -551,7 +564,6 @@ def _latest_base_feats(df: pd.DataFrame) -> Optional[dict]:
         sd = s.rolling(w, min_periods=max(2,w//3)).std().replace(0, np.nan)
         val = (arr[-1] - float(mu.iloc[-1])) / (float(sd.iloc[-1]) if pd.notna(sd.iloc[-1]) and sd.iloc[-1]>0 else 1.0)
         return float(val)
-    # ATR14
     prev_close = np.r_[np.nan, c[:-1]]
     tr = np.nanmax(np.c_[
         (h-l),
@@ -570,6 +582,18 @@ def _latest_base_feats(df: pd.DataFrame) -> Optional[dict]:
     }
     if any([not np.isfinite(v) for v in feats.values()]): return None
     return feats
+
+# ==== PATCH: helper for dynamic CB threshold ====
+def _cb_dynamic_cut(symbol: str, fallback_thr: float = MIN_CB_THR) -> float:
+    """Return a dynamic probability cut from recent CB confidences (quantile)."""
+    buf = CB_CONF_BUF.setdefault(symbol, deque(maxlen=max(50, CB_Q_WIN)))
+    if not buf:
+        return float(fallback_thr)
+    arr = sorted(buf)
+    k = int(min(max(0, round((len(arr)-1) * CB_Q_PERC)), len(arr)-1))
+    q = float(arr[k])
+    return max(float(fallback_thr), q)
+
 
 # ==== PATCH: catboost_direction (drop-in replacement) ====
 @torch.no_grad()
@@ -729,6 +753,31 @@ def _entry_allowed_by_filters(symbol: str, side: str, entry_ref: float) -> bool:
         if VERBOSE: print(f"[SKIP] {symbol} ROI edge {edge_bps:.1f} < need {need_bps:.1f}bps (v={v_bps:.1f})")
         return False
     return True
+# ==== PATCH: risk guard on close ====
+def _risk_guard_on_close(symbol: str, pnl_bps: float):
+    """Update day/consecutive loss guards and enforce cooldown if breached."""
+    global RISK_CONSEC_LOSS, RISK_DAY_CUM_BPS, RISK_LAST_RESET_DAY, COOLDOWN_UNTIL
+    today = time.strftime("%Y-%m-%d")
+    if today != RISK_LAST_RESET_DAY:
+        RISK_LAST_RESET_DAY = today
+        RISK_DAY_CUM_BPS = 0.0
+        RISK_CONSEC_LOSS = 0
+
+    RISK_DAY_CUM_BPS += float(pnl_bps)
+    if pnl_bps <= 0:
+        RISK_CONSEC_LOSS += 1
+    else:
+        RISK_CONSEC_LOSS = 0
+
+    breach = (RISK_DAY_CUM_BPS <= MAX_DD_BPS_DAY) or (RISK_CONSEC_LOSS >= MAX_CONSEC_LOSS)
+    if breach:
+        until = time.time() + RISK_COOLDOWN_SEC
+        for s in SYMBOLS:
+            COOLDOWN_UNTIL[s] = until
+        if VERBOSE:
+            print(f"[RISK] cooldown {RISK_COOLDOWN_SEC}s "
+                  f"(day_dd={RISK_DAY_CUM_BPS:.1f}bps, consec={RISK_CONSEC_LOSS})")
+
 
 # ===== I/O =====
 def _ensure_csv():
@@ -805,7 +854,7 @@ def choose_entry(symbol: str):
 
 def try_enter(symbol: str):
     if TRACE:
-        _scan_tick(symbol)   # 매 루프마다 한 줄 상태 로그
+        _scan_tick(symbol)
     global SESSION_START_TS, SESSION_TRADES
 
     if time.time() - SESSION_START_TS >= SESSION_MAX_MINUTES * 60:
@@ -878,30 +927,6 @@ def try_enter(symbol: str):
         if VERBOSE:
             print(f"[OPEN] {symbol} {side} entry={mid:.4f} timeout={horizon_min}m "
                   f"abs≈{STATE[symbol]['abs_usd']:.2f}USD  [EQUITY]={get_wallet_equity():.2f}")
-# ==== PATCH: risk guard on close ====
-def _risk_guard_on_close(symbol: str, pnl_bps: float):
-    """Update day/consecutive loss guards and enforce cooldown if breached."""
-    global RISK_CONSEC_LOSS, RISK_DAY_CUM_BPS, RISK_LAST_RESET_DAY, COOLDOWN_UNTIL
-    today = time.strftime("%Y-%m-%d")
-    if today != RISK_LAST_RESET_DAY:
-        RISK_LAST_RESET_DAY = today
-        RISK_DAY_CUM_BPS = 0.0
-        RISK_CONSEC_LOSS = 0
-
-    RISK_DAY_CUM_BPS += float(pnl_bps)
-    if pnl_bps <= 0:
-        RISK_CONSEC_LOSS += 1
-    else:
-        RISK_CONSEC_LOSS = 0
-
-    breach = (RISK_DAY_CUM_BPS <= MAX_DD_BPS_DAY) or (RISK_CONSEC_LOSS >= MAX_CONSEC_LOSS)
-    if breach:
-        until = time.time() + RISK_COOLDOWN_SEC
-        for s in SYMBOLS:
-            COOLDOWN_UNTIL[s] = until
-        if VERBOSE:
-            print(f"[RISK] cooldown {RISK_COOLDOWN_SEC}s "
-                  f"(day_dd={RISK_DAY_CUM_BPS:.1f}bps, consec={RISK_CONSEC_LOSS})")
 
 # ==== PATCH: close_and_log (drop-in replacement; calls _risk_guard_on_close) ====
 def close_and_log(symbol: str, reason: str):
@@ -924,6 +949,26 @@ def close_and_log(symbol: str, reason: str):
     STATE.pop(symbol, None)
     COOLDOWN_UNTIL[symbol] = time.time() + COOLDOWN_SEC
     _risk_guard_on_close(symbol, pnl_bps)
+
+def _bps(pnl_usd: float, notional_usd: float) -> float:
+    if notional_usd <= 0: return 0.0
+    return (pnl_usd / notional_usd) * 10_000.0
+
+def _meta_push(symbol: str, pnl_bps: float):
+    META_TRADES.setdefault(symbol, deque(maxlen=max(5, META_WIN))).append(float(pnl_bps))
+
+def _meta_stats(symbol: str) -> Tuple[float,float,float]:
+    arr = list(META_TRADES.get(symbol, []))
+    if not arr: return 1.0, 0.0, 0.0
+    n = len(arr)
+    hit = sum(1 for x in arr if x > 0) / n
+    mean = sum(arr)/n
+    peak = -1e18; mdd = 0.0; cum = 0.0
+    for x in arr:
+        cum += x
+        if cum > peak: peak = cum
+        mdd = min(mdd, cum - peak)
+    return hit, mean, mdd
 
 # ===== Monitor =====
 def monitor_loop(poll_sec: float = 1.0, max_loops: int = 2):
@@ -996,14 +1041,14 @@ def monitor_loop(poll_sec: float = 1.0, max_loops: int = 2):
 
 # ===== Main =====
 def main():
-    print(f"[START] PAPER TCN+CatBoost | TESTNET={TESTNET}")
+    print(f"[START] PAPER TCN+CatBoost | Binance USDT-M | TESTNET={BINANCE_TESTNET}")
     _log_equity(get_wallet_equity())
     _log_equity_mtm(get_equity_mtm())
 
     if DIAG:
         for s in SYMBOLS:
             _whynot(s)
-        return  # 진단만 하고 종료
+        return
 
     while True:
         if SCAN_PARALLEL:
@@ -1014,7 +1059,6 @@ def main():
                 try_enter(s)
         monitor_loop(1.0, 2)
         time.sleep(0.5)
-
 
 if __name__ == "__main__":
     main()
