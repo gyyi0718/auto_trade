@@ -186,6 +186,7 @@ V_BPS_FLOOR               = env_float("V_BPS_FLOOR", 8.0)
 MAX_DD_BPS_DAY    = env_float("MAX_DD_BPS_DAY", -800.0)
 MAX_CONSEC_LOSS   = env_int("MAX_CONSEC_LOSS", 5)
 RISK_COOLDOWN_SEC = env_int("RISK_COOLDOWN_SEC", 900)
+HOLD_UNTIL_TIMEOUT = env_bool("HOLD_UNTIL_TIMEOUT", True)  # True면 예측시간(타임아웃)까지 보유, 이후 강제청산
 
 SPREAD_BPS_MAX  = env_float("SPREAD_BPS_MAX", 6.0)
 
@@ -1050,25 +1051,18 @@ def _scan_tick(symbol: str):
     print(f"[SCAN] {symbol} | " + " | ".join(fields) + f" -> {verdict}")
 
 def try_enter(symbol: str):
-    if SESS.in_warmup(): return
-    if symbol in BROKER.positions(): return
+    # 세션 시간/트레이드 수 제약 제거, 쿨다운/포지션 중복만 체크
+    if symbol in BROKER.positions():
+        return
     now = time.time()
-    global SESSION_START_TS, SESSION_TRADES
-    if now - SESSION_START_TS >= SESSION_MAX_MINUTES * 60:
-        SESSION_START_TS = now; SESSION_TRADES = 0
-    if SESSION_MAX_TRADES > 0 and SESSION_TRADES >= SESSION_MAX_TRADES:
-        if VERBOSE:
-            remain = int(SESSION_MAX_MINUTES * 60 - (now - SESSION_START_TS))
-            print(f"[SKIP] session trade cap hit (remain {max(remain, 0)}s)")
+    if COOLDOWN_UNTIL.get(symbol, 0.0) > now:
         return
-    if (now - SESSION_START_TS) >= (SESSION_MAX_MINUTES * 60):
-        if VERBOSE: print("[SKIP] session time cap hit")
-        return
-    if COOLDOWN_UNTIL.get(symbol, 0.0) > now: return
 
     side, conf = choose_entry(symbol)
-    if side not in ("Buy", "Sell"): return
-    if not _meta_allows(symbol): return
+    if side not in ("Buy", "Sell"):
+        return
+    if not _meta_allows(symbol):
+        return
 
     dq = ENTRY_HISTORY[symbol]; need = max(1, N_CONSEC_SIGNALS)
     dq.append(side)
@@ -1087,16 +1081,20 @@ def try_enter(symbol: str):
     if TRACE: _scan_tick(symbol)
     ts = int(time.time())
     with ENTRY_LOCK:
-        if symbol in BROKER.positions(): return
-        if not BROKER.try_open(symbol, side, mid, ts): return
+        if symbol in BROKER.positions():
+            return
+        if not BROKER.try_open(symbol, side, mid, ts):
+            return
+
+        # 모델 예측 기반 타임아웃 분 계산
         horizon_min = max(1, int(calc_timeout_minutes(symbol, side)))
         POSITION_DEADLINE[symbol] = ts + horizon_min * 60
 
+        # 상태만 기록. HOLD_UNTIL_TIMEOUT=True이면 TP/SL 등은 모니터링에서 사용하지 않음.
         tp1 = tp_from_bps(mid, TP1_BPS, side)
         tp2 = tp_from_bps(mid, TP2_BPS, side)
         tp3 = tp_from_bps(mid, TP3_BPS, side)
         sl  = mid * (1.0 - SL_ROI_PCT) if side == "Buy" else mid * (1.0 + SL_ROI_PCT)
-
         pos_qty = BROKER.positions()[symbol]["qty"]
         STATE[symbol] = {
             "tp1": tp1, "tp2": tp2, "tp3": tp3, "sl": sl,
@@ -1111,11 +1109,8 @@ def try_enter(symbol: str):
             "tp1": f"{tp1:.6f}", "tp2": f"{tp2:.6f}", "tp3": f"{tp3:.6f}",
             "sl": f"{sl:.6f}", "reason": "open", "mode": "paper"
         })
-
-        SESSION_TRADES += 1
         if VERBOSE:
-            print(f"[OPEN] {symbol} {side} entry={mid:.6f} timeout={horizon_min}m "
-                  f"abs≈{STATE[symbol]['abs_usd']:.2f}USD  [EQUITY]={get_wallet_equity():.2f}")
+            print(f"[OPEN] {symbol} {side} entry={mid:.6f} timeout={horizon_min}m  [EQUITY]={get_wallet_equity():.2f}")
 
 def calc_timeout_minutes(symbol: str, side: Optional[str] = None) -> int:
     if TIMEOUT_MODE == "fixed":
@@ -1135,7 +1130,8 @@ def calc_timeout_minutes(symbol: str, side: Optional[str] = None) -> int:
 
 def close_and_log(symbol: str, reason: str):
     now = int(time.time())
-    if symbol not in BROKER.positions(): return
+    if symbol not in BROKER.positions():
+        return
     p = BROKER.positions()[symbol]
     side = p["side"]; entry = p["entry"]; qty = p["qty"]
     _,_,mark = get_quote(symbol)
@@ -1144,7 +1140,7 @@ def close_and_log(symbol: str, reason: str):
     notional = max(entry * qty, 1e-9)
     pnl_bps = _bps(gross - fee, notional)
 
-    # --- PATCH: ABS_TP 라벨 보정(순이익>0 → TAKE_PROFIT, 아니면 ABS_EXIT)
+    # ABS_TP 라벨 보정 유지
     final_tag = reason
     if reason == "ABS_TP":
         final_tag = "TAKE_PROFIT" if (gross - fee) > 0 else "ABS_EXIT"
@@ -1155,28 +1151,29 @@ def close_and_log(symbol: str, reason: str):
                 "tp1":"","tp2":"","tp3":"","sl":"","reason":final_tag,"mode":"paper"})
     if VERBOSE:
         print(f"[{final_tag}] {symbol} pnl_bps={pnl_bps:.1f} gross={gross:.6f} fee={fee:.6f} eq={new_eq:.2f}")
+
     POSITION_DEADLINE.pop(symbol, None)
     STATE.pop(symbol, None)
     COOLDOWN_UNTIL[symbol] = time.time() + COOLDOWN_SEC
 
-    SESS.on_trade_close(pnl_bps)
-    need, why = SESS.should_restart()
-    if need:
-        _restart_session(why)
-
-    _risk_guard_on_close(symbol, pnl_bps)
+    # 세션 재시작·종료 관련 호출 삭제
+    _risk_guard_on_close(symbol, pnl_bps)  # 위험관리 쿨다운은 유지
 
 def monitor_loop(poll_sec: float = 1.0, max_loops: int = 2):
     loops = 0
     while loops < max_loops:
         _log_equity_mtm(get_equity_mtm())
         now = int(time.time())
+
         for sym, p in list(BROKER.positions().items()):
             side = p["side"]; entry = float(p["entry"]); qty = float(p["qty"])
             bid, ask, mark = get_quote(sym)
-            if mark <= 0: continue
+            if mark <= 0:
+                continue
+
             st = STATE.get(sym)
             if st is None:
+                # 상태 기본값만 보정
                 tp1 = tp_from_bps(entry, TP1_BPS, side)
                 tp2 = tp_from_bps(entry, TP2_BPS, side)
                 tp3 = tp_from_bps(entry, TP3_BPS, side)
@@ -1186,87 +1183,77 @@ def monitor_loop(poll_sec: float = 1.0, max_loops: int = 2):
                       "abs_usd": _dynamic_abs_tp_usd(sym, entry, qty),
                       "mfe_px": entry, "opened_ts": int(p.get("opened", now))}
                 STATE[sym] = st
+
+            # 예측시간(타임아웃)만 강제청산 트리거로 사용
+            ddl = POSITION_DEADLINE.get(sym)
+            to_hit = (ddl and now >= ddl)
+
+            if HOLD_UNTIL_TIMEOUT:
+                # TP/SL/ABS/트레일/디케이 전부 무시. 타임아웃 도달 시에만 청산.
+                if to_hit:
+                    close_and_log(sym, "HORIZON_TIMEOUT")
+                    continue
             else:
-                st.setdefault("tp1", tp_from_bps(entry, TP1_BPS, side))
-                st.setdefault("tp2", tp_from_bps(entry, TP2_BPS, side))
-                st.setdefault("tp3", tp_from_bps(entry, TP3_BPS, side))
-                st.setdefault("sl",  entry * (1.0 - SL_ROI_PCT) if side=="Buy" else entry * (1.0 + SL_ROI_PCT))
-                st.setdefault("tp1_filled", False)
-                st.setdefault("tp2_filled", False)
-                st.setdefault("be_moved",   False)
-                st.setdefault("abs_usd", _dynamic_abs_tp_usd(sym, entry, qty))
-                st.setdefault("mfe_px", entry)
-                st.setdefault("opened_ts", int(p.get("opened", now)))
-
-            # TP1
-            if (not st["tp1_filled"]) and ((mark>=st["tp1"] and side=="Buy") or (mark<=st["tp1"] and side=="Sell")):
-                part = qty * TP1_RATIO
-                apply_trade_pnl(side, entry, st["tp1"], part, taker_fee=TAKER_FEE)
-                p["qty"] = qty = max(0.0, qty - part)
-                st["tp1_filled"] = True
-                _log_trade({"ts": now, "event":"TP1_FILL","symbol":sym,"side":side,
-                            "qty":f"{part:.8f}","entry":f"{entry:.6f}","exit":f"{st['tp1']:.6f}",
-                            "tp1":"","tp2":"","tp3":"","sl":"","reason":"","mode":"paper"})
-
-            # TP2
-            if qty>0 and (not st["tp2_filled"]) and ((mark>=st["tp2"] and side=="Buy") or (mark<=st["tp2"] and side=="Sell")):
-                remain_ratio = 1.0 - TP1_RATIO
-                part = min(qty, remain_ratio*TP2_RATIO)
-                apply_trade_pnl(side, entry, st["tp2"], part, taker_fee=TAKER_FEE)
-                p["qty"] = qty = max(0.0, qty - part)
-                st["tp2_filled"] = True
-                _log_trade({"ts": now, "event":"TP2_FILL","symbol":sym,"side":side,
-                            "qty":f"{part:.8f}","entry":f"{entry:.6f}","exit":f"{st['tp2']:.6f}",
-                            "tp1":"","tp2":"","tp3":"","sl":"","reason":"","mode":"paper"})
-
-            # BE after TP2
-            if st["tp2_filled"] and not st["be_moved"]:
-                be_px = entry*(1.0 + BE_EPS_BPS/10000.0) if side=="Buy" else entry*(1.0 - BE_EPS_BPS/10000.0)
-                st["sl"] = be_px; st["be_moved"] = True
-                _log_trade({"ts": now,"event":"MOVE_SL","symbol":sym,"side":side,
-                            "qty":"","entry":"","exit":"","tp1":"","tp2":"","tp3":"",
-                            "sl":f"{be_px:.6f}","reason":"BE","mode":"paper"})
-
-            # FAST-BE
-            if not st["be_moved"]:
-                gain_bps = _bps_between(entry, mark)
-                if (side=="Buy" and mark<entry) or (side=="Sell" and mark>entry): gain_bps = 0.0
-                if gain_bps >= FAST_BE_BPS:
+                # 기존 동작 유지 분기
+                # --- TP1
+                if (not st["tp1_filled"]) and ((mark>=st["tp1"] and side=="Buy") or (mark<=st["tp1"] and side=="Sell")):
+                    part = qty * TP1_RATIO
+                    apply_trade_pnl(side, entry, st["tp1"], part, taker_fee=TAKER_FEE)
+                    p["qty"] = qty = max(0.0, qty - part)
+                    st["tp1_filled"] = True
+                    _log_trade({"ts": now, "event":"TP1_FILL","symbol":sym,"side":side,
+                                "qty":f"{part:.8f}","entry":f"{entry:.6f}","exit":f"{st['tp1']:.6f}",
+                                "tp1":"","tp2":"","tp3":"","sl":"","reason":"","mode":"paper"})
+                # --- TP2
+                if qty>0 and (not st["tp2_filled"]) and ((mark>=st["tp2"] and side=="Buy") or (mark<=st["tp2"] and side=="Sell")):
+                    remain_ratio = 1.0 - TP1_RATIO
+                    part = min(qty, remain_ratio*TP2_RATIO)
+                    apply_trade_pnl(side, entry, st["tp2"], part, taker_fee=TAKER_FEE)
+                    p["qty"] = qty = max(0.0, qty - part)
+                    st["tp2_filled"] = True
+                    _log_trade({"ts": now, "event":"TP2_FILL","symbol":sym,"side":side,
+                                "qty":f"{part:.8f}","entry":f"{entry:.6f}","exit":f"{st['tp2']:.6f}",
+                                "tp1":"","tp2":"","tp3":"","sl":"","reason":"","mode":"paper"})
+                # --- BE/FAST-BE/트레일 및 디케이
+                if st["tp2_filled"] and not st["be_moved"]:
                     be_px = entry*(1.0 + BE_EPS_BPS/10000.0) if side=="Buy" else entry*(1.0 - BE_EPS_BPS/10000.0)
                     st["sl"] = be_px; st["be_moved"] = True
                     _log_trade({"ts": now,"event":"MOVE_SL","symbol":sym,"side":side,
                                 "qty":"","entry":"","exit":"","tp1":"","tp2":"","tp3":"",
-                                "sl":f"{be_px:.6f}","reason":"FAST_BE","mode":"paper"})
+                                "sl":f"{be_px:.6f}","reason":"BE","mode":"paper"})
+                if not st["be_moved"]:
+                    gain_bps = _bps_between(entry, mark)
+                    if (side=="Buy" and mark<entry) or (side=="Sell" and mark>entry):
+                        gain_bps = 0.0
+                    if gain_bps >= FAST_BE_BPS:
+                        be_px = entry*(1.0 + BE_EPS_BPS/10000.0) if side=="Buy" else entry*(1.0 - BE_EPS_BPS/10000.0)
+                        st["sl"] = be_px; st["be_moved"] = True
+                        _log_trade({"ts": now,"event":"MOVE_SL","symbol":sym,"side":side,
+                                    "qty":"","entry":"","exit":"","tp1":"","tp2":"","tp3":"",
+                                    "sl":f"{be_px:.6f}","reason":"FAST_BE","mode":"paper"})
+                if (st["tp1_filled"] if TRAIL_AFTER_TIER==1 else st["tp2_filled"]):
+                    if side=="Buy": st["sl"] = max(st["sl"], mark*(1.0 - TRAIL_BPS/10000.0))
+                    else:           st["sl"] = min(st["sl"], mark*(1.0 + TRAIL_BPS/10000.0))
 
-            # trailing
-            if (st["tp1_filled"] if TRAIL_AFTER_TIER==1 else st["tp2_filled"]):
-                if side=="Buy": st["sl"] = max(st["sl"], mark*(1.0 - TRAIL_BPS/10000.0))
-                else:           st["sl"] = min(st["sl"], mark*(1.0 + TRAIL_BPS/10000.0))
+                # 디케이 및 기타 종료
+                if qty > 0:
+                    age = now - st["opened_ts"]
+                    if side=="Buy":
+                        st["mfe_px"] = max(st["mfe_px"], mark); draw = (st["mfe_px"] - mark) / max(st["mfe_px"], 1e-12)
+                    else:
+                        st["mfe_px"] = min(st["mfe_px"], mark); draw = (mark - st["mfe_px"]) / max(st["mfe_px"], 1e-12)
+                    decay_hit = (age >= DECAY_GRACE_SEC) and (draw >= DECAY_PCT)
+                    sl_hit  = (mark <= st["sl"] and side=="Buy") or (mark >= st["sl"] and side=="Sell")
+                    pnl     = unrealized_pnl_usd(side, qty, entry, mark)
+                    abs_hit = pnl >= st["abs_usd"]
+                    if (age >= MIN_LOCK_SEC) and (abs_hit or sl_hit or to_hit or decay_hit):
+                        reason = "ABS_TP" if abs_hit else ("SL" if sl_hit else ("HORIZON_TIMEOUT" if to_hit else "PROFIT_DECAY"))
+                        close_and_log(sym, reason)
+                        continue
 
-            # MFE + decay
-            if side=="Buy":
-                st["mfe_px"] = max(st["mfe_px"], mark); draw = (st["mfe_px"] - mark) / max(st["mfe_px"], 1e-12)
-            else:
-                st["mfe_px"] = min(st["mfe_px"], mark); draw = (mark - st["mfe_px"]) / max(st["mfe_px"], 1e-12)
-
-            age = now - st["opened_ts"]
-            decay_hit = (age >= DECAY_GRACE_SEC) and (draw >= DECAY_PCT)
-
-            # exits
-            if qty > 0:
-                pnl = unrealized_pnl_usd(side, qty, entry, mark)
-                abs_hit = pnl >= st["abs_usd"]
-                sl_hit  = (mark <= st["sl"] and side=="Buy") or (mark >= st["sl"] and side=="Sell")
-                ddl     = POSITION_DEADLINE.get(sym)
-                to_hit  = (ddl and now >= ddl)
-                if (age >= MIN_LOCK_SEC) and (abs_hit or sl_hit or to_hit or decay_hit):
-                    reason = "ABS_TP" if abs_hit else ("SL" if sl_hit else ("HORIZON_TIMEOUT" if to_hit else "PROFIT_DECAY"))
-                    close_and_log(sym, reason)
-                    continue
         loops += 1
         time.sleep(poll_sec)
-    if SESS.session_time_over():
-        _restart_session("HIT_TIME")
+    # 세션 종료 트리거 제거
 
 def _whynot(symbol: str):
     msgs = []
