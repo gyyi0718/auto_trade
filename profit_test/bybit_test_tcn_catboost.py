@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-bybit_test_tcn_catboost.py  (patched)
+bybit_test_tcn_catboost.py  (hedge-mode patched)
 - PAPER trading loop using TCN(+optional CatBoost) with Bybit public API
+- Hedge mode: long/short per symbol are independent ((symbol, side) keys)
 - Honors PRESET env strictly (OFF/A/B). No hidden preset re-application.
-- Patch 포함:
-  * OPEN 게이트: 수수료+슬리피지+스프레드+세이프티 고려한 '최소 TP(bps)' 미만 진입 차단
-  * EXIT 라벨: ABS_TP는 순이익>0이면 TAKE_PROFIT, 아니면 ABS_EXIT 로 출력
-  * EQUITY_MTM: 동일값/근접값 반복 로깅 억제(간격/임계치)
+- Patches kept:
+  * OPEN gate: min TP(bps) >= fee+slip+spread+safety
+  * EXIT label: ABS_TP -> TAKE_PROFIT if net>0 else ABS_EXIT
+  * EQUITY_MTM logging suppression
 """
 import os, time, math, csv, random, threading, collections, logging, warnings, json
 from typing import Optional, Dict, Tuple, List
@@ -50,7 +51,23 @@ def env_list(name: str, default_csv: str) -> List[str]:
     raw = os.getenv(name, default_csv)
     return [s.strip() for s in raw.split(",") if s.strip()]
 
-# ===== alias support (user-typed env names → canonical)
+VERBOSE    = env_bool("VERBOSE", True)
+
+# turn CatBoost off by default
+USE_CATBOOST = env_bool("USE_CATBOOST", False)
+if USE_CATBOOST:
+    try:
+        from catboost import CatBoostClassifier, Pool
+        CATBOOST_CBM  = os.getenv("CATBOOST_CBM",  "../multimodel/models/catboost_meta.cbm")
+        CATBOOST_META = os.getenv("CATBOOST_META", "../multimodel/models/catboost_meta_features.json")
+        CB_MODEL = CatBoostClassifier()
+        CB_MODEL.load_model(CATBOOST_CBM)
+        with open(CATBOOST_META, "r", encoding="utf-8") as f:
+            CB_META = json.load(f)
+    except Exception as e:
+        CB_MODEL, CB_META = None, {}
+        print(f"[WARN] CatBoost load failed: {e}")
+# ===== alias support
 _INITIAL_ENV_KEYS = set(os.environ.keys())
 _ALIAS_TO_CANON = {
     "SPREAD_MAX_BPS": "SPREAD_BPS_MAX",
@@ -72,7 +89,6 @@ def _resolve_env_aliases():
             os.environ[canon] = os.environ[alias]
 
 def _user_overrode(canon: str) -> bool:
-    """did user set 'canon' or any of its aliases originally?"""
     if canon in _INITIAL_ENV_KEYS: return True
     for a in _CANON_TO_ALIASES.get(canon, []):
         if a in _INITIAL_ENV_KEYS: return True
@@ -91,13 +107,12 @@ def _print_config_summary():
         f"SAFETY_BPS={SAFETY_BPS} MTM_EPS={MTM_EPS} MTM_MIN_INTERVAL_SEC={MTM_MIN_INTERVAL_SEC}"
     )
 
-# apply alias mapping before reading envs
 _resolve_env_aliases()
 
 # ===== BASE CONFIG
 CATEGORY   = env_str("CATEGORY", "linear")
-INTERVAL   = env_str("INTERVAL", "1")  # 1m
-SYMBOLS    = env_list("SYMBOLS", "ASTERUSDT,AIAUSDT,0GUSDT,STBLUSDT,LINEAUSDT,BARDUSDT,SOMIUSDT,UBUSDT,OPENUSDT")
+INTERVAL   = env_str("INTERVAL", "1")
+SYMBOLS    = env_list("SYMBOLS", "BTCUSDT,ETHUSDT")
 DIAG       = env_bool("DIAG", False)
 TRACE      = env_bool("TRACE", True)
 VERBOSE    = env_bool("VERBOSE", True)
@@ -113,14 +128,12 @@ TAKER_FEE            = env_float("TAKER_FEE", 0.0006)
 SLIPPAGE_BPS_TAKER   = env_float("SLIPPAGE_BPS_TAKER", 0.5)
 FEE_SAFETY           = env_float("FEE_SAFETY", 1.2)
 
-# --- PATCH: 추가 보수 버퍼(bps) (기본 4bps). 수수료/슬립/스프레드 외 여유분.
-SAFETY_BPS           = env_float("SAFETY_BPS", 4.0)
+SAFETY_BPS           = env_float("SAFETY_BPS", 0.0)
 
-# --- PATCH: MTM 로깅 억제 파라미터
-MTM_EPS              = env_float("MTM_EPS", 0.01)     # USD 단위 최소 변화
+MTM_EPS              = env_float("MTM_EPS", 0.01)
 MTM_MIN_INTERVAL_SEC = env_float("MTM_MIN_INTERVAL_SEC", 5.0)
 
-TP1_BPS       = env_float("TP1_BPS", 30.0)
+TP1_BPS       = env_float("TP1_BPS", 50.0)
 TP2_BPS       = env_float("TP2_BPS", 80.0)
 TP3_BPS       = env_float("TP3_BPS", 150.0)
 SL_ROI_PCT    = env_float("SL_ROI_PCT", 0.015)
@@ -135,7 +148,7 @@ ABS_K             = env_float("ABS_K", 1.0)
 ABS_TP_USD_FLOOR  = env_float("ABS_TP_USD_FLOOR", 1.0)
 
 N_CONSEC_SIGNALS  = env_int("N_CONSEC_SIGNALS", 1)
-COOLDOWN_SEC      = env_int("COOLDOWN_SEC", 30)
+COOLDOWN_SEC      = env_int("COOLDOWN_SEC", 0)
 SESSION_MAX_TRADES= env_int("SESSION_MAX_TRADES", 1000)
 SESSION_MAX_MINUTES=env_int("SESSION_MAX_MINUTES", 1)
 
@@ -149,12 +162,12 @@ TRADES_FIELDS   = ["ts","event","symbol","side","qty","entry","exit","tp1","tp2"
 EQUITY_FIELDS   = ["ts","equity"]
 
 # ===== META/DECAY/TIMEOUT
-META_ON          = env_int("META_ON", 1)
+META_ON          = env_int("META_ON", 0)
 META_WIN         = env_int("META_WIN", 30)
 META_MIN_HIT     = env_float("META_MIN_HIT", 0.4)
 META_MIN_EVR     = env_float("META_MIN_EVR", 0.0)
 META_MAX_DD_BPS  = env_float("META_MAX_DD_BPS", -300.0)
-META_COOLDOWN    = env_int("META_COOLDOWN", 60)
+META_COOLDOWN    = env_int("META_COOLDOWN", 0)
 
 DECAY_GRACE_SEC  = env_int("DECAY_GRACE_SEC", 60)
 DECAY_PCT        = env_float("DECAY_PCT", 0.005)
@@ -177,32 +190,32 @@ MIN_CB_THR = env_float("MIN_CB_THR", 0.55)
 CB_THR          = env_float("CB_THR", 0.48)
 LOGIT_PROB_THR  = env_float("LOGIT_PROB_THR", 0.48)
 
-MIN_EXPECTED_ROI_BPS      = env_float("MIN_EXPECTED_ROI_BPS", 5.0)
-ROI_BASE_MIN_EXPECTED_BPS = env_float("ROI_BASE_MIN_EXPECTED_BPS", MIN_EXPECTED_ROI_BPS)  # base floor
+MIN_EXPECTED_ROI_BPS      = env_float("MIN_EXPECTED_ROI_BPS", 2.0)
+ROI_BASE_MIN_EXPECTED_BPS = env_float("ROI_BASE_MIN_EXPECTED_BPS", MIN_EXPECTED_ROI_BPS)
 ROI_LOWVOL_BOOST_BPS      = env_float("ROI_LOWVOL_BOOST_BPS", 0.0)
 ROI_POORMETA_BOOST_BPS    = env_float("ROI_POORMETA_BOOST_BPS", 0.0)
 V_BPS_FLOOR               = env_float("V_BPS_FLOOR", 8.0)
 
 MAX_DD_BPS_DAY    = env_float("MAX_DD_BPS_DAY", -800.0)
 MAX_CONSEC_LOSS   = env_int("MAX_CONSEC_LOSS", 5)
-RISK_COOLDOWN_SEC = env_int("RISK_COOLDOWN_SEC", 900)
-HOLD_UNTIL_TIMEOUT = env_bool("HOLD_UNTIL_TIMEOUT", True)  # True면 예측시간(타임아웃)까지 보유, 이후 강제청산
+RISK_COOLDOWN_SEC = env_int("RISK_COOLDOWN_SEC", 0)
+HOLD_UNTIL_TIMEOUT = env_bool("HOLD_UNTIL_TIMEOUT", True)
 
-SPREAD_BPS_MAX  = env_float("SPREAD_BPS_MAX", 6.0)
+SPREAD_BPS_MAX  = env_float("SPREAD_BPS_MAX", 0.0)
 
-# ===== SESSION RESTART
+# ===== SESSION RESTART (kept)
 SESSION_WARMUP_SEC      = env_int("SESSION_WARMUP_SEC", 10)
 SESSION_TARGET_PNL_BPS  = env_float("SESSION_TARGET_PNL_BPS", +100000.0)
 SESSION_MAX_DD_BPS      = env_float("SESSION_MAX_DD_BPS", -1500.0)
 SESSION_HARD_MINUTES    = env_float("SESSION_HARD_MINUTES", 180.0)
-SESSION_COOLDOWN_SEC    = env_int("SESSION_COOLDOWN_SEC", 30)
+SESSION_COOLDOWN_SEC    = env_int("SESSION_COOLDOWN_SEC", 0)
 SESSION_BANK_PROFITS    = env_bool("SESSION_BANK_PROFITS", False)
 SESSION_START_EQUITY    = env_float("SESSION_START_EQUITY", START_EQUITY)
 
-# ===== RUNTIME STATE
+# ===== RUNTIME STATE  (hedge mode uses (symbol, side) keys)
 _equity_cache = START_EQUITY
-POSITION_DEADLINE: Dict[str,int] = {}
-STATE: Dict[str,dict] = {}
+POSITION_DEADLINE: Dict[Tuple[str,str], int] = {}
+STATE: Dict[Tuple[str,str], dict] = {}
 ENTRY_LOCK = threading.Lock()
 ENTRY_HISTORY: Dict[str,collections.deque] = {s: collections.deque(maxlen=max(1,N_CONSEC_SIGNALS)) for s in SYMBOLS}
 COOLDOWN_UNTIL: Dict[str,float] = {}
@@ -217,13 +230,12 @@ RISK_CONSEC_LOSS = 0
 RISK_DAY_CUM_BPS = 0.0
 RISK_LAST_RESET_DAY = time.strftime("%Y-%m-%d")
 
-# --- PATCH: MTM 로깅 상태
 _mtm_last_val: Optional[float] = None
 _mtm_last_ts: float = 0.0
+CB_MODEL, CB_META = None, {}
 
 # ===== PRESETS
 def apply_scalping_preset(preset: str = "A"):
-    """A: 보수 / B: 완화 / OFF: 미적용. (사용자가 ENV로 준 값은 덮어쓰지 않음)"""
     global TP1_BPS, TP2_BPS, TP3_BPS, SL_ROI_PCT
     global V_BPS_FLOOR, N_CONSEC_SIGNALS
     global CB_Q_PERC, MIN_CB_THR, FAST_BE_BPS, TRAIL_BPS, TRAIL_AFTER_TIER
@@ -244,29 +256,24 @@ def apply_scalping_preset(preset: str = "A"):
         set_if_user_not_overrode("TP1_BPS", 15.0); set_if_user_not_overrode("TP2_BPS", 22.0); set_if_user_not_overrode("TP3_BPS", 40.0)
         set_if_user_not_overrode("SL_ROI_PCT", 0.012)
         set_if_user_not_overrode("V_BPS_FLOOR", 10.0)
-        set_if_user_not_overrode("ROI_BASE_MIN_EXPECTED_BPS", 12.0)
+        set_if_user_not_overrode("ROI_BASE_MIN_EXPECTED_BPS", 5.0)
         set_if_user_not_overrode("ROI_LOWVOL_BOOST_BPS", 3.0)
         set_if_user_not_overrode("N_CONSEC_SIGNALS", 1)
-
         set_if_user_not_overrode("CB_Q_PERC", 0.75); set_if_user_not_overrode("MIN_CB_THR", 0.50)
         set_if_user_not_overrode("FAST_BE_BPS", 10.0); set_if_user_not_overrode("TRAIL_BPS", 20.0); set_if_user_not_overrode("TRAIL_AFTER_TIER", 1)
-
         set_if_user_not_overrode("TIMEOUT_MODE", "model"); set_if_user_not_overrode("TIMEOUT_MIN", 1); set_if_user_not_overrode("TIMEOUT_MAX", 2); set_if_user_not_overrode("PRED_HORIZ_MIN", 1)
         set_if_user_not_overrode("SPREAD_BPS_MAX", 6.0)
         if not _user_overrode("ENTRY_EQUITY_PCT"):
             globals()["ENTRY_EQUITY_PCT"] = min(ENTRY_EQUITY_PCT, 0.10)
-
-    else:  # "B"
+    else:
         set_if_user_not_overrode("TP1_BPS", 20.0); set_if_user_not_overrode("TP2_BPS", 30.0); set_if_user_not_overrode("TP3_BPS", 60.0)
         set_if_user_not_overrode("SL_ROI_PCT", 0.015)
         set_if_user_not_overrode("V_BPS_FLOOR", 3.0)
         set_if_user_not_overrode("ROI_BASE_MIN_EXPECTED_BPS", 10.0)
         set_if_user_not_overrode("ROI_LOWVOL_BOOST_BPS", 2.0)
         set_if_user_not_overrode("N_CONSEC_SIGNALS", 1)
-
         set_if_user_not_overrode("CB_Q_PERC", 0.70); set_if_user_not_overrode("MIN_CB_THR", 0.50)
         set_if_user_not_overrode("FAST_BE_BPS", 12.0); set_if_user_not_overrode("TRAIL_BPS", 25.0); set_if_user_not_overrode("TRAIL_AFTER_TIER", 1)
-
         set_if_user_not_overrode("TIMEOUT_MODE", "model"); set_if_user_not_overrode("TIMEOUT_MIN", 1); set_if_user_not_overrode("TIMEOUT_MAX", 2); set_if_user_not_overrode("PRED_HORIZ_MIN", 1)
         set_if_user_not_overrode("SPREAD_BPS_MAX", 8.0)
         if not _user_overrode("ENTRY_EQUITY_PCT"):
@@ -284,12 +291,9 @@ def apply_scalping_preset(preset: str = "A"):
 
 # ===== read & apply PRESET =====
 PRESET = env_str("PRESET", "A")
-apply_scalping_preset(PRESET)
-
-# ===== final config print
+#apply_scalping_preset(PRESET)
 _print_config_summary()
 
-# === add near imports / globals ===
 WHY = os.getenv("WHY","0").lower() in ("1","y","yes","true")
 
 def why_log(symbol, side, p_tcn, cb_conf, vol_bps, spread_bps, edge_bps, need_bps,
@@ -305,7 +309,6 @@ def why_log(symbol, side, p_tcn, cb_conf, vol_bps, spread_bps, edge_bps, need_bp
     )
 
 def reapply_env_overrides_after_preset():
-    """프리셋 이후 ENV 우선."""
     global TP1_BPS, TP2_BPS, TP3_BPS, SL_ROI_PCT
     global V_BPS_FLOOR, N_CONSEC_SIGNALS
     global CB_Q_PERC, MIN_CB_THR, FAST_BE_BPS, TRAIL_BPS, TRAIL_AFTER_TIER
@@ -343,7 +346,7 @@ def maybe_apply_preset():
     _PRESET_APPLIED = True
 
 def print_runtime_header():
-    print(f"[START] PAPER TCN+CatBoost | TESTNET={BYBIT_TESTNET} | PUBLIC_API=bybit v5")
+    print(f"[START] PAPER TCN+CatBoost | TESTNET={BYBIT_TESTNET} | PUBLIC_API=bybit v5 | HEDGE=ON")
     print(f"[EQUITY] {START_EQUITY:.2f}")
     print(
         f"[CONFIG] MODE={ENTRY_MODE} | LEV={LEVERAGE}x | ENTRY_PCT={ENTRY_EQUITY_PCT:.2f} "
@@ -438,9 +441,7 @@ def _entry_cost_bps()->float:
 def _exit_cost_bps()->float:
     return TAKER_FEE*1e4 + SLIPPAGE_BPS_TAKER
 
-# --- PATCH: 최소 TP 요구(bps) 계산
 def _min_tp_required_bps(spread_bps: float) -> float:
-    # 2*(진입수수료+슬립) + 현재 스프레드 + 세이프티(bps)
     return 2.0*(_entry_cost_bps()) + float(spread_bps) + float(SAFETY_BPS)
 
 def recent_vol_bps(symbol: str, minutes: int = None) -> float:
@@ -460,14 +461,127 @@ def _log_thr_from_bps(target_bps: float) -> float:
     return math.log1p(target_bps / 1e4)
 
 # ===== TCN
-
-
-TCN_CKPT = os.getenv("TCN_CKPT", "../multimodel/models/tcn_triplebarrier_daily_ep011.ckpt")
+# ===== TCN (load patch)
+TCN_CKPT = os.getenv("TCN_CKPT", "../multimodel/models_daily/daily_limit_tp_ep035.ckpt")
 TCN_FEATS = ["ret","rv","mom","vz"]
 TCN_SEQ_LEN_FALLBACK = 240
 TCN_HAS_MU = False
 TCN_THR_PROB = float(os.getenv("TCN_THR_PROB","0.48"))
 TCN_MODEL=None; TCN_CFG={}; TCN_MU=None; TCN_SD=None; TCN_SEQ_LEN=TCN_SEQ_LEN_FALLBACK; TCN_HEAD="reg"
+
+def _strip_prefix(state, prefixes=("model.", "net.", "module.")):
+    out={}
+    for k,v in state.items():
+        nk=k
+        for p in prefixes:
+            if nk.startswith(p):
+                nk = nk[len(p):]
+        out[nk]=v
+    return out
+
+try:
+    ck = torch.load(TCN_CKPT, map_location="cpu")
+    # Lightning(.ckpt) 호환
+    raw_state = ck.get("model", None)
+    if raw_state is None:
+        raw_state = ck.get("state_dict", None)
+    if raw_state is None and isinstance(ck, dict) and all(isinstance(k, str) for k in ck.keys()):
+        raw_state = ck  # 순수 state dict
+
+    if raw_state is None or not isinstance(raw_state, dict) or len(raw_state)==0:
+        raise RuntimeError(f"bad checkpoint format keys={list(ck.keys()) if isinstance(ck,dict) else type(ck)}")
+
+    state = _strip_prefix(raw_state)
+
+    # cfg/스케일러 추출
+    TCN_CFG = ck.get("cfg", {})
+    if "FEATS" in TCN_CFG: TCN_FEATS = TCN_CFG["FEATS"]
+    TCN_SEQ_LEN = int(TCN_CFG.get("SEQ_LEN", TCN_SEQ_LEN_FALLBACK))
+    TCN_MU = ck.get("scaler_mu", ck.get("mu", None))
+    TCN_SD = ck.get("scaler_sd", ck.get("sd", None))
+
+    # 교체
+    # 교체
+    cand = [k for k in state.keys()
+            if k.endswith("tcn.0.conv1.weight_v") or k.endswith("tcn.0.conv1.weight")
+            or k.endswith("tcn.0.c1.weight_v") or k.endswith("tcn.0.c1.weight")]
+    if not cand:
+        # 가장 일반화된 백업: tcn.0.* 에서 weight 포함
+        cand = [k for k in state.keys() if k.startswith("tcn.0.") and ("weight" in k)]
+    if not cand:
+        raise RuntimeError(f"no TCN first conv weight key found; sample={list(state.keys())[:6]}")
+
+    k0 = cand[0]
+    w0 = state[k0]
+    hidden = w0.shape[0];
+    in_feat = w0.shape[1];
+    k_size = w0.shape[2]
+    levels = 1 + max(int(k.split('.')[1]) for k in state.keys()
+                     if k.startswith("tcn.") and (".conv1." in k or ".c1." in k))
+
+    head_w = state.get("head.weight")
+    head_out = head_w.shape[0] if head_w is not None else 2
+
+    class Chomp1d(nn.Module):
+        def __init__(self, chomp_size): super().__init__(); self.chomp_size = chomp_size
+        def forward(self, x): return x[:, :, :-self.chomp_size].contiguous()
+    def weight_norm_conv(in_c, out_c, k, dilation):
+        pad = (k-1)*dilation
+        return nn.utils.weight_norm(nn.Conv1d(in_c, out_c, kernel_size=k, padding=pad, dilation=dilation))
+    class TemporalBlock(nn.Module):
+        def __init__(self, in_c, out_c, k, dilation, dropout):
+            super().__init__()
+            self.conv1 = weight_norm_conv(in_c, out_c, k, dilation)
+            self.chomp1 = Chomp1d((k-1)*dilation)
+            self.relu1 = nn.ReLU()
+            self.drop1 = nn.Dropout(dropout)
+            self.conv2 = weight_norm_conv(out_c, out_c, k, dilation)
+            self.chomp2 = Chomp1d((k-1)*dilation)
+            self.relu2 = nn.ReLU()
+            self.drop2 = nn.Dropout(dropout)
+            self.downsample = nn.Conv1d(in_c, out_c, 1) if in_c != out_c else None
+            self.relu = nn.ReLU()
+        def forward(self, x):
+            out = self.drop1(self.relu1(self.chomp1(self.conv1(x))))
+            out = self.drop2(self.relu2(self.chomp2(self.conv2(out))))
+            res = x if self.downsample is None else self.downsample(x)
+            return self.relu(out + res)
+    class TCNBinary(nn.Module):
+        def __init__(self, in_feat, hidden=128, levels=6, k=3, dropout=0.1, head_out=2):
+            super().__init__()
+            self.head_out = head_out
+            layers=[]; ch_in=in_feat
+            for i in range(levels):
+                layers += [TemporalBlock(ch_in, hidden, k, 2**i, dropout)]
+                ch_in = hidden
+            self.tcn = nn.Sequential(*layers)
+            self.head = nn.Linear(hidden, head_out)
+        def forward(self, x):
+            x = x.transpose(1,2)
+            h = self.tcn(x)[:, :, -1]
+            o = self.head(h)
+            if self.head_out == 1:   # cls
+                return None, o.squeeze(-1)
+            else:                    # reg/joint
+                return o[:,0], o[:,1]
+
+    TCN_MODEL = TCNBinary(in_feat=in_feat, hidden=hidden, levels=levels, k=k_size, dropout=0.1, head_out=head_out).eval()
+    TCN_MODEL.load_state_dict(state, strict=False)  # 일부 키 차이 허용
+    TCN_HEAD = "cls" if TCN_MODEL.head.out_features == 1 else "reg"
+
+    print(f"[TCN] loaded: feats={len(TCN_FEATS)} seq={TCN_SEQ_LEN} head={TCN_HEAD} in={in_feat} hid={hidden} L={levels} k={k_size}")
+    # in_feat와 피처 수 불일치 시 13채널 기본 세트로 강제
+    if 'in_feat' in locals() and in_feat == 13:
+        TCN_FEATS = ["ret",
+                     "rv5", "rv15", "rv30", "rv60",
+                     "mom5", "mom15", "mom30", "mom60",
+                     "vz20", "vz60",
+                     "atr14",
+                     "bias1"]
+
+except Exception as e:
+    print(f"[WARN] TCN load failed: {e}")
+    TCN_MODEL=None
 
 class Chomp1d(nn.Module):
     def __init__(self, chomp_size): super().__init__(); self.chomp_size = chomp_size
@@ -492,7 +606,7 @@ class TemporalBlock(nn.Module):
         self.relu = nn.ReLU()
     def forward(self, x):
         out = self.drop1(self.relu1(self.chomp1(self.conv1(x))))
-        out = self.drop2(self.relu2(self.chomp2(self.conv2(out))))
+        out = self.drop2(self.relu2(self.chomp2(out)))
         res = x if self.downsample is None else self.downsample(x)
         return self.relu(out + res)
 
@@ -511,7 +625,7 @@ class TCNBinary(nn.Module):
         x = x.transpose(1,2)
         h = self.tcn(x)[:, :, -1]
         o = self.head(h)
-        if self.head_out == 1:   # cls checkpoint
+        if self.head_out == 1:   # cls
             return None, o.squeeze(-1)
         else:                    # joint/reg
             return o[:,0], o[:,1]
@@ -519,23 +633,66 @@ class TCNBinary(nn.Module):
 def _build_tcn_features(df: pd.DataFrame) -> pd.DataFrame:
     g = df.sort_values("timestamp").copy()
     c = g["close"].astype(float).values
+    h = g["high"].astype(float).values
+    l = g["low"].astype(float).values
     v = g["volume"].astype(float).values
-    ret = np.zeros_like(c, dtype=np.float64); ret[1:] = np.log(c[1:] / np.clip(c[:-1], 1e-12, None))
-    win = 60
-    rv = pd.Series(ret).rolling(win, min_periods=win//3).std().bfill().values
-    ema_win=60; alpha=2/(ema_win+1); ema=np.zeros_like(c); ema[0]=c[0]
-    for i in range(1,len(c)): ema[i] = alpha*c[i] + (1-alpha)*ema[i-1]
-    mom = (c/np.maximum(ema,1e-12) - 1.0)
-    v_ma = pd.Series(v).rolling(win, min_periods=win//3).mean().bfill().values
-    v_sd = pd.Series(v).rolling(win, min_periods=win//3).std().replace(0, np.nan).bfill().values
-    vz  = (v - v_ma) / np.where(v_sd>0, v_sd, 1.0)
-    return pd.DataFrame({"timestamp": g["timestamp"].values,"ret": ret,"rv": rv,"mom": mom,"vz": vz})
+
+    # ret
+    logc = np.log(np.maximum(c, 1e-12))
+    ret = np.zeros_like(logc); ret[1:] = logc[1:] - logc[:-1]
+
+    # rv
+    def roll_std(x, w):
+        s = pd.Series(x).rolling(w, min_periods=max(2, w//3)).std()
+        return s.fillna(method="bfill").values
+    rv5, rv15, rv30, rv60 = (roll_std(ret, 5), roll_std(ret, 15), roll_std(ret, 30), roll_std(ret, 60))
+
+    # mom (price / EMA - 1)
+    def mom_w(x, w):
+        ema = pd.Series(x).ewm(span=w, adjust=False).mean().values
+        return (x/np.maximum(ema,1e-12) - 1.0)
+    mom5, mom15, mom30, mom60 = (mom_w(c,5), mom_w(c,15), mom_w(c,30), mom_w(c,60))
+
+    # vol z-score
+    def volz(x, w):
+        s = pd.Series(x)
+        mu = s.rolling(w, min_periods=max(2,w//3)).mean()
+        sd = s.rolling(w, min_periods=max(2,w//3)).std()
+        sd = sd.replace(0, np.nan)
+        z = (s - mu) / sd
+        return z.fillna(method="bfill").fillna(0.0).values
+    vz20, vz60 = (volz(v,20), volz(v,60))
+
+    # ATR14
+    prev_close = np.r_[np.nan, c[:-1]]
+    tr = np.nanmax(np.c_[ (h-l), np.abs(h - prev_close), np.abs(l - prev_close) ], axis=1)
+    atr14 = pd.Series(tr).rolling(14, min_periods=5).mean().fillna(method="bfill").values
+
+    # bias
+    bias1 = np.ones_like(ret)
+
+    out = pd.DataFrame({
+        "timestamp": pd.to_datetime(g["timestamp"].values),
+        "ret": ret,
+        "rv5": rv5, "rv15": rv15, "rv30": rv30, "rv60": rv60,
+        "mom5": mom5, "mom15": mom15, "mom30": mom30, "mom60": mom60,
+        "vz20": vz20, "vz60": vz60,
+        "atr14": atr14,
+        "bias1": bias1,
+    })
+    return out
 
 def _apply_tcn_scaler(X: np.ndarray, mu, sd):
-    if mu is None or sd is None: return X
-    mu = np.asarray(mu, dtype=np.float32); sd = np.asarray(sd, dtype=np.float32)
+    if mu is None or sd is None:
+        return X
+    mu = np.asarray(mu, dtype=np.float32).reshape(1, -1)
+    sd = np.asarray(sd, dtype=np.float32).reshape(1, -1)
     sd = np.where(sd>0, sd, 1.0)
+    # 스케일러 차원 안 맞으면 스킵
+    if mu.shape[1] != X.shape[1]:
+        return X
     return (X - mu) / sd
+
 
 def _tcn_thr():
     mode = os.getenv("THR_MODE", "fixed").lower()
@@ -543,42 +700,58 @@ def _tcn_thr():
         return float(fee_threshold())
     return float(os.getenv("MODEL_THR_BPS", "5.0")) / 1e4
 
-try:
-    ck = torch.load(TCN_CKPT, map_location="cpu")
-    state = ck.get("model", ck)
-    TCN_CFG = ck.get("cfg", {})
-    if "FEATS" in TCN_CFG: TCN_FEATS = TCN_CFG["FEATS"]
-    TCN_SEQ_LEN = int(TCN_CFG.get("SEQ_LEN", TCN_SEQ_LEN_FALLBACK))
+# (_tcn_thr 정의 바로 아래) 두 번째 로더 교체
+if TCN_MODEL is None:  # 첫 로더가 실패했을 때만 재시도
+    try:
+        ck = torch.load(TCN_CKPT, map_location="cpu")
+        state = ck.get("model", ck)
+        TCN_CFG = ck.get("cfg", {})
+        if "FEATS" in TCN_CFG: TCN_FEATS = TCN_CFG["FEATS"]
+        TCN_SEQ_LEN = int(TCN_CFG.get("SEQ_LEN", TCN_SEQ_LEN_FALLBACK))
 
-    k0 = next(k for k in state.keys() if k.endswith("tcn.0.conv1.weight_v") or k.endswith("tcn.0.conv1.weight"))
-    w0 = state[k0]
-    hidden = w0.shape[0]; in_feat = w0.shape[1]; k_size = w0.shape[2]
-    levels = 1 + max(int(k.split('.')[1]) for k in state.keys() if k.startswith("tcn.") and ".conv1." in k)
-    head_w = state.get("head.weight")
-    head_out = head_w.shape[0] if head_w is not None else 2
+        cand = [k for k in state.keys()
+                if k.endswith("tcn.0.conv1.weight_v") or k.endswith("tcn.0.conv1.weight")
+                or k.endswith("tcn.0.c1.weight_v")   or k.endswith("tcn.0.c1.weight")]
+        if not cand:
+            cand = [k for k in state.keys() if k.startswith("tcn.0.") and ("weight" in k)]
+        k0 = cand[0]
+        w0 = state[k0]
+        hidden = w0.shape[0]; in_feat = w0.shape[1]; k_size = w0.shape[2]
+        levels = 1 + max(int(k.split('.')[1]) for k in state.keys()
+                         if k.startswith("tcn.") and (".conv1." in k or ".c1." in k))
+        head_w = state.get("head.weight")
+        head_out = head_w.shape[0] if head_w is not None else 2
 
-    TCN_MODEL = TCNBinary(in_feat=in_feat, hidden=hidden, levels=levels, k=k_size, dropout=0.1, head_out=head_out).eval()
-    TCN_MODEL.load_state_dict(state, strict=True)
-    TCN_HEAD = "cls" if TCN_MODEL.head.out_features == 1 else "reg"
-    TCN_MU = ck.get("scaler_mu", None)
-    TCN_SD = ck.get("scaler_sd", None)
-except Exception as e:
-    print(f"[WARN] TCN load failed: {e}")
-    TCN_MODEL=None
+        TCN_MODEL = TCNBinary(in_feat=in_feat, hidden=hidden, levels=levels, k=k_size,
+                              dropout=0.1, head_out=head_out).eval()
+        TCN_MODEL.load_state_dict(state, strict=False)
+        TCN_HEAD = "cls" if TCN_MODEL.head.out_features == 1 else "reg"
+        TCN_MU = ck.get("scaler_mu", None); TCN_SD = ck.get("scaler_sd", None)
+    except Exception as e:
+        print(f"[WARN] TCN load failed: {e}")  # 여기서 TCN_MODEL=None으로 덮어쓰지 않음
+PREDICTION_LAG = env_int("PREDICTION_LAG", 0)  # 0=현재, 1=1분 후, 2=2분 후
+
 
 @torch.no_grad()
 def tcn_direction(symbol: str):
     if TCN_MODEL is None:
         return None, 0.0, _tcn_thr()
-    df = get_recent_1m(symbol, minutes=TCN_SEQ_LEN + 10)
-    if df is None or len(df) < (TCN_SEQ_LEN+1):
+
+    lag = max(0, PREDICTION_LAG)
+    df = get_recent_1m(symbol, minutes=TCN_SEQ_LEN + 10 + lag)
+    if df is None or len(df) < (TCN_SEQ_LEN + lag + 1):
         return None, 0.0, _tcn_thr()
 
     feats = _build_tcn_features(df)
-    X = feats[TCN_FEATS].tail(TCN_SEQ_LEN).to_numpy().astype(np.float32)
+
+    # lag만큼 과거 데이터 사용
+    if lag > 0:
+        X = feats[TCN_FEATS].iloc[-(TCN_SEQ_LEN + lag):-lag].to_numpy().astype(np.float32)
+    else:
+        X = feats[TCN_FEATS].tail(TCN_SEQ_LEN).to_numpy().astype(np.float32)
+
     X = _apply_tcn_scaler(X, TCN_MU, TCN_SD)
     x_t = torch.from_numpy(X[None, ...])
-
     y_hat, logit = TCN_MODEL(x_t)
     if y_hat is None:  # cls
         p = float(torch.sigmoid(logit).item())
@@ -677,6 +850,9 @@ def catboost_direction(symbol: str) -> Tuple[Optional[str], float]:
         return (None, 0.0)
     t_ok = (t_side in ("Buy","Sell")) and (abs(float(t_score)) >= float(t_thr))
     _log(f"[CB][{symbol}][TCN] side={t_side} score={t_score:.6g} thr={t_thr:.6g} ok={int(t_ok)}")
+    if AGREE_REQUIRED and not t_ok:
+        _log(f"[CB][{symbol}] -> SKIP: REQUIRE_TCN")
+        return (None, 0.0)
 
     if (CB_MODEL is None) or (not CB_META):
         if ALLOW_TCN_ONLY and t_ok:
@@ -752,29 +928,27 @@ def catboost_direction(symbol: str) -> Tuple[Optional[str], float]:
     _log(f"[CB][{symbol}] -> PASS {final_side} (conf={cb_conf:.3f})")
     return (final_side, cb_conf)
 
-# ===== Paper Broker
+# ===== Paper Broker (hedge)
 def _round_down(x: float, step: float) -> float:
     if step<=0: return x
     return math.floor(x/step)*step
 
 class PaperBroker:
     def __init__(self):
-        self.pos: Dict[str,dict] = {}
+        self.pos: Dict[Tuple[str,str],dict] = {}
         self.qty_step = 0.001
         self.min_qty = 0.001
-    def try_open(self, symbol: str, side: str, mid: float, ts: int):
+    def key(self, symbol,str_side): return (symbol, str_side)
+    def has_side(self, symbol, side): return self.key(symbol, side) in self.pos
+    def try_open(self, symbol: str, side: str, ts: int):
+        bid, ask, mid = get_quote(symbol)
+        if bid<=0 or ask<=0 or mid<=0: return False
+        px = _exec_taker_price(side, bid, ask, SLIPPAGE_BPS_TAKER)
         eq = get_wallet_equity()
-        qty = _round_down(eq * ENTRY_EQUITY_PCT * LEVERAGE / max(mid,1e-9), self.qty_step)
+        qty = _round_down(eq * ENTRY_EQUITY_PCT * LEVERAGE / max(px,1e-9), self.qty_step)
         if qty < self.min_qty: return False
-        self.pos[symbol] = {"side": side, "entry": mid, "qty": qty, "opened": ts}
+        self.pos[self.key(symbol, side)] = {"side": side, "entry": px, "qty": qty, "opened": ts}
         return True
-    def try_close(self, symbol: str, ts: int) -> Optional[float]:
-        if symbol not in self.pos: return None
-        _,_,mark = get_quote(symbol)
-        p = self.pos[symbol]; entry=p["entry"]; qty=p["qty"]
-        pnl = (mark-entry)*qty if p["side"]=="Buy" else (entry-mark)*qty
-        del self.pos[symbol]
-        return pnl
     def positions(self): return self.pos
 
 BROKER = PaperBroker()
@@ -794,7 +968,6 @@ def _ensure_csv():
         with open(EQUITY_MTM_CSV,"w",newline="",encoding="utf-8") as f:
             csv.writer(f).writerow(EQUITY_FIELDS)
 
-# --- PATCH: MTM 로깅(중복 억제)
 def _log_equity_mtm(eq: float):
     global _mtm_last_val, _mtm_last_ts
     now_ts = time.time()
@@ -823,8 +996,8 @@ def _log_equity(eq: float):
 def get_equity_mtm() -> float:
     base = get_wallet_equity()
     upnl = 0.0
-    for sym, p in BROKER.positions().items():
-        side, qty, entry = p["side"], p["qty"], p["entry"]
+    for (sym, side), p in BROKER.positions().items():
+        qty, entry = p["qty"], p["entry"]
         _,_,mark = get_quote(sym)
         if mark > 0:
             upnl += unrealized_pnl_usd(side, qty, entry, mark)
@@ -893,30 +1066,16 @@ def _clear_runtime_state():
     for s in SYMBOLS:
         ENTRY_HISTORY[s] = collections.deque(maxlen=max(1, N_CONSEC_SIGNALS))
         COOLDOWN_UNTIL[s] = 0.0
-        POSITION_DEADLINE.pop(s, None)
-        STATE.pop(s, None)
+    # prune STATE/POSITION_DEADLINE non-existing symbols
+    for d in (POSITION_DEADLINE, STATE):
+        for k in list(d.keys()):
+            if k[0] not in SYMBOLS:
+                d.pop(k, None)
+    for s in SYMBOLS:
         CB_CONF_BUF[s].clear()
         META_TRADES[s].clear()
     global RISK_CONSEC_LOSS
     RISK_CONSEC_LOSS = 0
-
-def _force_flatten_all(reason="SESSION_RESTART"):
-    for sym in list(BROKER.positions().keys()):
-        close_and_log(sym, reason)
-
-def _restart_session(tag: str):
-    _force_flatten_all(f"{tag}")
-    if SESSION_BANK_PROFITS:
-        bank_delta = max(0.0, get_wallet_equity() - SESSION_START_EQUITY)
-        if bank_delta > 0:
-            SESS.lockbox += bank_delta
-            _log_equity(get_wallet_equity() - bank_delta)
-    _clear_runtime_state()
-    SESS.reset_counters()
-    for s in SYMBOLS:
-        COOLDOWN_UNTIL[s] = time.time() + SESSION_COOLDOWN_SEC
-    if VERBOSE:
-        print(f"[SESSION] restart tag={tag} bank={SESS.lockbox:.2f} eq={get_wallet_equity():.2f} cool={SESSION_COOLDOWN_SEC}s")
 
 def _risk_guard_on_close(symbol: str, pnl_bps: float):
     global RISK_CONSEC_LOSS, RISK_DAY_CUM_BPS, RISK_LAST_RESET_DAY, COOLDOWN_UNTIL
@@ -957,19 +1116,16 @@ def _entry_allowed_by_filters(symbol: str, side: str, entry_ref: float) -> bool:
             if VERBOSE: print(f"[SKIP] {symbol} spread {spr_bps:.1f}bps > {SPREAD_BPS_MAX}bps")
             return False
 
-    # --- ROI/TP 여유 검증
     tp1_px   = tp_from_bps(entry_ref, TP1_BPS, side)
     edge_bps = _bps_between(entry_ref, tp1_px)
 
-    # --- PATCH: 최소 TP(bps) 게이트 (수수료/슬립/스프레드/세이프티)
     if spr_bps is not None:
         req_min = _min_tp_required_bps(spr_bps)
         if edge_bps < req_min:
             if VERBOSE:
-                print(f"[SKIP] {symbol} MIN_TP_BREACH tp={edge_bps:.1f}bps < req={req_min:.1f}bps (fee/slip/spread/safety)")
+                print(f"[SKIP] {symbol} MIN_TP_BREACH tp={edge_bps:.1f}bps < req={req_min:.1f}bps")
             return False
 
-    # --- 추가 ROI 기준 (기존 로직 유지)
     base_need = _entry_cost_bps() + _exit_cost_bps() + ROI_BASE_MIN_EXPECTED_BPS
     need_bps  = base_need
     if v_bps < (2.0 * V_BPS_FLOOR):
@@ -999,16 +1155,21 @@ def _meta_allows(symbol: str) -> bool:
     return True
 
 def choose_entry(symbol: str):
-    side, conf = catboost_direction(symbol)
-    return side, conf
+    # TCN-only path
+    side, score, thr = tcn_direction(symbol)
+    if side in ("Buy", "Sell") and abs(float(score)) >= float(thr):
+        # “confidence” 자리에 절대값 점수 사용
+        return side, float(abs(score))
+    return None, 0.0
 
-def _scan_tick(symbol: str):
+def _scan_tick(symbol: str, side_probe: Optional[str]=None):
     now = time.time()
     fields = []; reasons=[]
-    has_pos = symbol in BROKER.positions()
+    has_long = BROKER.has_side(symbol, "Buy")
+    has_short= BROKER.has_side(symbol, "Sell")
+    fields.append(f"posL={int(has_long)} posS={int(has_short)}")
     cd_left = max(0, int(COOLDOWN_UNTIL.get(symbol,0.0) - now))
-    fields.append(f"pos={int(has_pos)}"); fields.append(f"cool={cd_left}s")
-    if has_pos: reasons.append("HAS_POS")
+    fields.append(f"cool={cd_left}s")
     if cd_left>0: reasons.append("COOLDOWN")
     if META_ON:
         hit, evr, mdd = _meta_stats(symbol)
@@ -1022,95 +1183,116 @@ def _scan_tick(symbol: str):
         if t_side is None: reasons.append("NO_TCN_SIG")
     except Exception as e:
         fields.append(f"tcn_err={e}"); reasons.append("TCN_ERR"); t_side=None; thr=0
-    cb_side, cb_conf = catboost_direction(symbol)
-    fields.append(f"cb_side={cb_side} cb_conf={cb_conf:.2f}")
-    if cb_side is None: reasons.append("CB_BLOCK")
+    if USE_CATBOOST and CB_MODEL is not None and CB_META:
+        cb_side, cb_conf = catboost_direction(symbol)
+        fields.append(f"cb_side={cb_side} cb_conf={cb_conf:.2f}")
+        # 필요 시 여기서만 CatBoost 기준 추가 필터링
+    else:
+        cb_side, cb_conf = None, 0.0
+        # CatBoost 미사용 시 CB_BLOCK 이유는 추가하지 않음
+
     v_bps = recent_vol_bps(symbol, VOL_WIN)
     vol_ok = v_bps >= V_BPS_FLOOR
     fields.append(f"vol={v_bps:.1f}bps floor={V_BPS_FLOOR:.1f} {'OK' if vol_ok else 'LOW'}")
     if not vol_ok: reasons.append("LOW_VOL")
-    if t_side in ("Buy","Sell"):
+    probe = side_probe or t_side
+    if probe in ("Buy","Sell"):
         bid, ask, mid = get_quote(symbol)
-        if (t_side=="Buy" and ask>0) or (t_side=="Sell" and bid>0):
-            entry_ref = float(ask if t_side=="Buy" else bid)
-            tp1 = tp_from_bps(entry_ref, TP1_BPS, t_side)
+        if (probe=="Buy" and ask>0) or (probe=="Sell" and bid>0):
+            entry_ref = float(ask if probe=="Buy" else bid)
+            tp1 = tp_from_bps(entry_ref, TP1_BPS, probe)
             edge_bps = _bps_between(entry_ref, tp1)
             need_bps = _entry_cost_bps() + _exit_cost_bps() + ROI_BASE_MIN_EXPECTED_BPS
-            ok = edge_bps >= need_bps
-            fields.append(f"roi_edge={edge_bps:.1f} need={need_bps:.1f} {'OK' if ok else 'LOW'}")
-            # --- PATCH: min_tp 요구치 리포트
+            fields.append(f"roi_edge={edge_bps:.1f} need={need_bps:.1f} {'OK' if edge_bps>=need_bps else 'LOW'}")
             if bid>0 and ask>0:
                 sp = _bps_between(bid, ask); req = _min_tp_required_bps(sp)
                 fields.append(f"min_tp_req={req:.1f}bps {'OK' if edge_bps>=req else 'LOW'}")
                 if edge_bps < req: reasons.append("MIN_TP")
     dq = ENTRY_HISTORY[symbol]; need = max(1, N_CONSEC_SIGNALS)
     fields.append(f"consec={len(dq)}/{need} buf={list(dq)}")
-    if need>1 and (len(dq)<need or any(x != (t_side or "") for x in dq)):
+    if need>1 and (len(dq)<need or any(x != (probe or "") for x in dq)):
         reasons.append("CONSEC")
     verdict = "PASS" if not reasons else ("SKIP:" + ",".join(reasons))
     print(f"[SCAN] {symbol} | " + " | ".join(fields) + f" -> {verdict}")
 
 def try_enter(symbol: str):
-    # 세션 시간/트레이드 수 제약 제거, 쿨다운/포지션 중복만 체크
-    if symbol in BROKER.positions():
-        return
-    now = time.time()
-    if COOLDOWN_UNTIL.get(symbol, 0.0) > now:
+    # cooldown
+    if COOLDOWN_UNTIL.get(symbol, 0.0) > time.time():
         return
 
+    # model signal
     side, conf = choose_entry(symbol)
     if side not in ("Buy", "Sell"):
         return
+
+    # hedge: same-side exists -> skip
+    if BROKER.has_side(symbol, side):
+        return
+
+    # meta filter
     if not _meta_allows(symbol):
         return
 
-    dq = ENTRY_HISTORY[symbol]; need = max(1, N_CONSEC_SIGNALS)
+    # consecutive signals gate
+    dq = ENTRY_HISTORY[symbol]
+    need = max(1, N_CONSEC_SIGNALS)
     dq.append(side)
     if need > 1 and (len(dq) < need or any(x != side for x in dq)):
         if VERBOSE: print(f"[SKIP] consec fail {symbol} need={need} got={list(dq)}")
-        if TRACE: _scan_tick(symbol)
+        if TRACE: _scan_tick(symbol, side)
         return
 
+    # quotes
     bid, ask, mid = get_quote(symbol)
-    if mid <= 0 or (side == "Buy" and ask <= 0) or (side == "Sell" and bid <= 0):
+    if bid <= 0 or ask <= 0 or mid <= 0:
         return
+
+    # pre-entry filters use executable reference price
     entry_ref = float(ask if side == "Buy" else bid)
     if not _entry_allowed_by_filters(symbol, side, entry_ref):
+        if TRACE: _scan_tick(symbol, side)
         return
 
-    if TRACE: _scan_tick(symbol)
+    if TRACE: _scan_tick(symbol, side)
+
     ts = int(time.time())
     with ENTRY_LOCK:
-        if symbol in BROKER.positions():
+        # re-check state after lock
+        if BROKER.has_side(symbol, side):
             return
-        if not BROKER.try_open(symbol, side, mid, ts):
+        # execute entry at taker with slippage inside broker
+        if not BROKER.try_open(symbol, side, ts):
             return
 
-        # 모델 예측 기반 타임아웃 분 계산
+        # use actual filled entry price
+        entry_px = float(BROKER.positions()[(symbol, side)]["entry"])
+        pos_qty  = float(BROKER.positions()[(symbol, side)]["qty"])
+
+        # timeout horizon
         horizon_min = max(1, int(calc_timeout_minutes(symbol, side)))
-        POSITION_DEADLINE[symbol] = ts + horizon_min * 60
+        POSITION_DEADLINE[(symbol, side)] = ts + horizon_min * 60
 
-        # 상태만 기록. HOLD_UNTIL_TIMEOUT=True이면 TP/SL 등은 모니터링에서 사용하지 않음.
-        tp1 = tp_from_bps(mid, TP1_BPS, side)
-        tp2 = tp_from_bps(mid, TP2_BPS, side)
-        tp3 = tp_from_bps(mid, TP3_BPS, side)
-        sl  = mid * (1.0 - SL_ROI_PCT) if side == "Buy" else mid * (1.0 + SL_ROI_PCT)
-        pos_qty = BROKER.positions()[symbol]["qty"]
-        STATE[symbol] = {
+        # targets and SL from filled price
+        tp1 = tp_from_bps(entry_px, TP1_BPS, side)
+        tp2 = tp_from_bps(entry_px, TP2_BPS, side)
+        tp3 = tp_from_bps(entry_px, TP3_BPS, side)
+        sl  = entry_px * (1.0 - SL_ROI_PCT) if side == "Buy" else entry_px * (1.0 + SL_ROI_PCT)
+
+        STATE[(symbol, side)] = {
             "tp1": tp1, "tp2": tp2, "tp3": tp3, "sl": sl,
             "tp1_filled": False, "tp2_filled": False, "be_moved": False,
-            "abs_usd": _dynamic_abs_tp_usd(symbol, mid, pos_qty),
-            "mfe_px": mid, "opened_ts": ts
+            "abs_usd": _dynamic_abs_tp_usd(symbol, entry_px, pos_qty),
+            "mfe_px": entry_px, "opened_ts": ts
         }
 
         _log_trade({
             "ts": ts, "event": "ENTRY", "symbol": symbol, "side": side,
-            "qty": f"{pos_qty:.8f}", "entry": f"{mid:.6f}", "exit": "",
+            "qty": f"{pos_qty:.8f}", "entry": f"{entry_px:.6f}", "exit": "",
             "tp1": f"{tp1:.6f}", "tp2": f"{tp2:.6f}", "tp3": f"{tp3:.6f}",
             "sl": f"{sl:.6f}", "reason": "open", "mode": "paper"
         })
         if VERBOSE:
-            print(f"[OPEN] {symbol} {side} entry={mid:.6f} timeout={horizon_min}m  [EQUITY]={get_wallet_equity():.2f}")
+            print(f"[OPEN] {symbol} {side} entry={entry_px:.6f} timeout={horizon_min}m  [EQUITY]={get_wallet_equity():.2f}")
 
 def calc_timeout_minutes(symbol: str, side: Optional[str] = None) -> int:
     if TIMEOUT_MODE == "fixed":
@@ -1128,138 +1310,148 @@ def calc_timeout_minutes(symbol: str, side: Optional[str] = None) -> int:
     need = math.ceil((target_bps / v_bps) * TIMEOUT_K)
     return int(min(max(need, TIMEOUT_MIN), TIMEOUT_MAX))
 
-def close_and_log(symbol: str, reason: str):
+def close_and_log(symbol: str, side: str, reason: str):
     now = int(time.time())
-    if symbol not in BROKER.positions():
-        return
-    p = BROKER.positions()[symbol]
-    side = p["side"]; entry = p["entry"]; qty = p["qty"]
-    _,_,mark = get_quote(symbol)
-    BROKER.try_close(symbol, now)
-    gross, fee, new_eq = apply_trade_pnl(side, entry, mark, qty, taker_fee=TAKER_FEE)
+    if not BROKER.has_side(symbol, side): return
+    p = BROKER.positions()[(symbol, side)]
+    entry = float(p["entry"]); qty = float(p["qty"])
+    bid, ask, _ = get_quote(symbol)
+    # 반대 사이드로 시장가 청산
+    exit_side = "Sell" if side=="Buy" else "Buy"
+    exec_px = _exec_taker_price(exit_side, bid, ask, SLIPPAGE_BPS_TAKER)
+
+    # 포지션 닫기
+    del BROKER.positions()[(symbol, side)]
+    gross, fee, new_eq = apply_trade_pnl(side, entry, exec_px, qty, taker_fee=TAKER_FEE)
     notional = max(entry * qty, 1e-9)
     pnl_bps = _bps(gross - fee, notional)
 
-    # ABS_TP 라벨 보정 유지
-    final_tag = reason
-    if reason == "ABS_TP":
-        final_tag = "TAKE_PROFIT" if (gross - fee) > 0 else "ABS_EXIT"
-
+    final_tag = "TAKE_PROFIT" if (reason=="ABS_TP" and (gross - fee) > 0) else ("ABS_EXIT" if reason=="ABS_TP" else reason)
     _meta_push(symbol, pnl_bps)
-    _log_trade({"ts": now, "event":"EXIT", "symbol":symbol, "side":"Sell" if side=="Buy" else "Buy",
-                "qty":f"{qty:.8f}","entry":f"{entry:.6f}","exit":f"{mark:.6f}",
+    _log_trade({"ts": now,"event":"EXIT","symbol":symbol,"side":exit_side,
+                "qty":f"{qty:.8f}","entry":f"{entry:.6f}","exit":f"{exec_px:.6f}",
                 "tp1":"","tp2":"","tp3":"","sl":"","reason":final_tag,"mode":"paper"})
     if VERBOSE:
-        print(f"[{final_tag}] {symbol} pnl_bps={pnl_bps:.1f} gross={gross:.6f} fee={fee:.6f} eq={new_eq:.2f}")
+        print(f"[{final_tag}] {symbol}/{side} pnl_bps={pnl_bps:.1f} gross={gross:.6f} fee={fee:.6f} eq={new_eq:.2f}")
 
-    POSITION_DEADLINE.pop(symbol, None)
-    STATE.pop(symbol, None)
+    POSITION_DEADLINE.pop((symbol, side), None)
+    STATE.pop((symbol, side), None)
     COOLDOWN_UNTIL[symbol] = time.time() + COOLDOWN_SEC
-
-    # 세션 재시작·종료 관련 호출 삭제
-    _risk_guard_on_close(symbol, pnl_bps)  # 위험관리 쿨다운은 유지
+    _risk_guard_on_close(symbol, pnl_bps)
 
 def monitor_loop(poll_sec: float = 1.0, max_loops: int = 2):
     loops = 0
     while loops < max_loops:
+        # mark-to-market 로그
         _log_equity_mtm(get_equity_mtm())
         now = int(time.time())
 
-        for sym, p in list(BROKER.positions().items()):
-            side = p["side"]; entry = float(p["entry"]); qty = float(p["qty"])
+        for (sym, side), p in list(BROKER.positions().items()):
+            entry = float(p["entry"])
+            qty   = float(p["qty"])
             bid, ask, mark = get_quote(sym)
             if mark <= 0:
                 continue
 
-            st = STATE.get(sym)
+            # 상태 초기화 보정
+            st = STATE.get((sym, side))
             if st is None:
-                # 상태 기본값만 보정
                 tp1 = tp_from_bps(entry, TP1_BPS, side)
                 tp2 = tp_from_bps(entry, TP2_BPS, side)
                 tp3 = tp_from_bps(entry, TP3_BPS, side)
                 sl  = entry * (1.0 - SL_ROI_PCT) if side == "Buy" else entry * (1.0 + SL_ROI_PCT)
-                st = {"tp1": tp1, "tp2": tp2, "tp3": tp3, "sl": sl,
-                      "tp1_filled": False, "tp2_filled": False, "be_moved": False,
-                      "abs_usd": _dynamic_abs_tp_usd(sym, entry, qty),
-                      "mfe_px": entry, "opened_ts": int(p.get("opened", now))}
-                STATE[sym] = st
+                st = {
+                    "tp1": tp1, "tp2": tp2, "tp3": tp3, "sl": sl,
+                    "tp1_filled": False, "tp2_filled": False, "be_moved": False,
+                    "abs_usd": _dynamic_abs_tp_usd(sym, entry, qty),
+                    "mfe_px": entry, "opened_ts": int(p.get("opened", now))
+                }
+                STATE[(sym, side)] = st
 
-            # 예측시간(타임아웃)만 강제청산 트리거로 사용
-            ddl = POSITION_DEADLINE.get(sym)
-            to_hit = (ddl and now >= ddl)
+            # 타임아웃 판정
+            ddl = POSITION_DEADLINE.get((sym, side))
+            to_hit = bool(ddl and now >= int(ddl))
 
+            # 타임아웃 모드 처리
             if HOLD_UNTIL_TIMEOUT:
-                # TP/SL/ABS/트레일/디케이 전부 무시. 타임아웃 도달 시에만 청산.
                 if to_hit:
-                    close_and_log(sym, "HORIZON_TIMEOUT")
+                    close_and_log(sym, side, "HORIZON_TIMEOUT")
                     continue
             else:
-                # 기존 동작 유지 분기
-                # --- TP1
-                if (not st["tp1_filled"]) and ((mark>=st["tp1"] and side=="Buy") or (mark<=st["tp1"] and side=="Sell")):
+                # 분할청산 로직
+                if (not st["tp1_filled"]) and ((side == "Buy" and mark >= st["tp1"]) or (side == "Sell" and mark <= st["tp1"])):
                     part = qty * TP1_RATIO
                     apply_trade_pnl(side, entry, st["tp1"], part, taker_fee=TAKER_FEE)
-                    p["qty"] = qty = max(0.0, qty - part)
+                    BROKER.positions()[(sym, side)]["qty"] = qty = max(0.0, qty - part)
                     st["tp1_filled"] = True
-                    _log_trade({"ts": now, "event":"TP1_FILL","symbol":sym,"side":side,
-                                "qty":f"{part:.8f}","entry":f"{entry:.6f}","exit":f"{st['tp1']:.6f}",
-                                "tp1":"","tp2":"","tp3":"","sl":"","reason":"","mode":"paper"})
-                # --- TP2
-                if qty>0 and (not st["tp2_filled"]) and ((mark>=st["tp2"] and side=="Buy") or (mark<=st["tp2"] and side=="Sell")):
+                    _log_trade({"ts": now, "event": "TP1_FILL", "symbol": sym, "side": side,
+                                "qty": f"{part:.8f}", "entry": f"{entry:.6f}", "exit": f"{st['tp1']:.6f}",
+                                "tp1": "", "tp2": "", "tp3": "", "sl": "", "reason": "", "mode": "paper"})
+                if qty > 0 and (not st["tp2_filled"]) and ((side == "Buy" and mark >= st["tp2"]) or (side == "Sell" and mark <= st["tp2"])):
                     remain_ratio = 1.0 - TP1_RATIO
-                    part = min(qty, remain_ratio*TP2_RATIO)
+                    part = min(qty, remain_ratio * TP2_RATIO)
                     apply_trade_pnl(side, entry, st["tp2"], part, taker_fee=TAKER_FEE)
-                    p["qty"] = qty = max(0.0, qty - part)
+                    BROKER.positions()[(sym, side)]["qty"] = qty = max(0.0, qty - part)
                     st["tp2_filled"] = True
-                    _log_trade({"ts": now, "event":"TP2_FILL","symbol":sym,"side":side,
-                                "qty":f"{part:.8f}","entry":f"{entry:.6f}","exit":f"{st['tp2']:.6f}",
-                                "tp1":"","tp2":"","tp3":"","sl":"","reason":"","mode":"paper"})
-                # --- BE/FAST-BE/트레일 및 디케이
-                if st["tp2_filled"] and not st["be_moved"]:
-                    be_px = entry*(1.0 + BE_EPS_BPS/10000.0) if side=="Buy" else entry*(1.0 - BE_EPS_BPS/10000.0)
-                    st["sl"] = be_px; st["be_moved"] = True
-                    _log_trade({"ts": now,"event":"MOVE_SL","symbol":sym,"side":side,
-                                "qty":"","entry":"","exit":"","tp1":"","tp2":"","tp3":"",
-                                "sl":f"{be_px:.6f}","reason":"BE","mode":"paper"})
-                if not st["be_moved"]:
-                    gain_bps = _bps_between(entry, mark)
-                    if (side=="Buy" and mark<entry) or (side=="Sell" and mark>entry):
-                        gain_bps = 0.0
-                    if gain_bps >= FAST_BE_BPS:
-                        be_px = entry*(1.0 + BE_EPS_BPS/10000.0) if side=="Buy" else entry*(1.0 - BE_EPS_BPS/10000.0)
-                        st["sl"] = be_px; st["be_moved"] = True
-                        _log_trade({"ts": now,"event":"MOVE_SL","symbol":sym,"side":side,
-                                    "qty":"","entry":"","exit":"","tp1":"","tp2":"","tp3":"",
-                                    "sl":f"{be_px:.6f}","reason":"FAST_BE","mode":"paper"})
-                if (st["tp1_filled"] if TRAIL_AFTER_TIER==1 else st["tp2_filled"]):
-                    if side=="Buy": st["sl"] = max(st["sl"], mark*(1.0 - TRAIL_BPS/10000.0))
-                    else:           st["sl"] = min(st["sl"], mark*(1.0 + TRAIL_BPS/10000.0))
+                    _log_trade({"ts": now, "event": "TP2_FILL", "symbol": sym, "side": side,
+                                "qty": f"{part:.8f}", "entry": f"{entry:.6f}", "exit": f"{st['tp2']:.6f}",
+                                "tp1": "", "tp2": "", "tp3": "", "sl": "", "reason": "", "mode": "paper"})
 
-                # 디케이 및 기타 종료
+                # BE 이동
                 if qty > 0:
-                    age = now - st["opened_ts"]
-                    if side=="Buy":
-                        st["mfe_px"] = max(st["mfe_px"], mark); draw = (st["mfe_px"] - mark) / max(st["mfe_px"], 1e-12)
-                    else:
-                        st["mfe_px"] = min(st["mfe_px"], mark); draw = (mark - st["mfe_px"]) / max(st["mfe_px"], 1e-12)
-                    decay_hit = (age >= DECAY_GRACE_SEC) and (draw >= DECAY_PCT)
-                    sl_hit  = (mark <= st["sl"] and side=="Buy") or (mark >= st["sl"] and side=="Sell")
-                    pnl     = unrealized_pnl_usd(side, qty, entry, mark)
-                    abs_hit = pnl >= st["abs_usd"]
-                    if (age >= MIN_LOCK_SEC) and (abs_hit or sl_hit or to_hit or decay_hit):
-                        reason = "ABS_TP" if abs_hit else ("SL" if sl_hit else ("HORIZON_TIMEOUT" if to_hit else "PROFIT_DECAY"))
-                        close_and_log(sym, reason)
-                        continue
+                    if st["tp2_filled"] and not st["be_moved"]:
+                        be_px = entry * (1.0 + BE_EPS_BPS / 10000.0) if side == "Buy" else entry * (1.0 - BE_EPS_BPS / 10000.0)
+                        st["sl"] = be_px; st["be_moved"] = True
+                        _log_trade({"ts": now, "event": "MOVE_SL", "symbol": sym, "side": side,
+                                    "qty": "", "entry": "", "exit": "", "tp1": "", "tp2": "", "tp3": "",
+                                    "sl": f"{be_px:.6f}", "reason": "BE", "mode": "paper"})
+                    # 빠른 BE
+                    if not st["be_moved"]:
+                        gain_bps = _bps_between(entry, mark)
+                        if (side == "Buy" and mark < entry) or (side == "Sell" and mark > entry):
+                            gain_bps = 0.0
+                        if gain_bps >= FAST_BE_BPS:
+                            be_px = entry * (1.0 + BE_EPS_BPS / 10000.0) if side == "Buy" else entry * (1.0 - BE_EPS_BPS / 10000.0)
+                            st["sl"] = be_px; st["be_moved"] = True
+                            _log_trade({"ts": now, "event": "MOVE_SL", "symbol": sym, "side": side,
+                                        "qty": "", "entry": "", "exit": "", "tp1": "", "tp2": "", "tp3": "",
+                                        "sl": f"{be_px:.6f}", "reason": "FAST_BE", "mode": "paper"})
+
+                    # 트레일링
+                    if (st["tp1_filled"] if TRAIL_AFTER_TIER == 1 else st["tp2_filled"]):
+                        if side == "Buy":
+                            st["sl"] = max(st["sl"], mark * (1.0 - TRAIL_BPS / 10000.0))
+                        else:
+                            st["sl"] = min(st["sl"], mark * (1.0 + TRAIL_BPS / 10000.0))
+
+            # 공통 종료 조건(ABS/SL/타임아웃/감소)
+            if qty > 0:
+                age = now - st["opened_ts"]
+                if side == "Buy":
+                    st["mfe_px"] = max(st["mfe_px"], mark)
+                    draw = (st["mfe_px"] - mark) / max(st["mfe_px"], 1e-12)
+                else:
+                    st["mfe_px"] = min(st["mfe_px"], mark)
+                    draw = (mark - st["mfe_px"]) / max(st["mfe_px"], 1e-12)
+
+                decay_hit = (age >= DECAY_GRACE_SEC) and (draw >= DECAY_PCT)
+                sl_hit    = ((mark <= st["sl"]) if side == "Buy" else (mark >= st["sl"]))
+                pnl_usd   = unrealized_pnl_usd(side, qty, entry, mark)
+                abs_hit   = pnl_usd >= st["abs_usd"]
+
+                if (age >= MIN_LOCK_SEC) and (abs_hit or sl_hit or to_hit or decay_hit):
+                    reason = "ABS_TP" if abs_hit else ("SL" if sl_hit else ("HORIZON_TIMEOUT" if to_hit else "PROFIT_DECAY"))
+                    close_and_log(sym, side, reason)
+                    continue
 
         loops += 1
         time.sleep(poll_sec)
-    # 세션 종료 트리거 제거
 
 def _whynot(symbol: str):
     msgs = []
     now = time.time()
     if COOLDOWN_UNTIL.get(symbol,0.0) > now: msgs.append(f"cooldown={int(COOLDOWN_UNTIL[symbol]-now)}s")
-    msgs.append(f"has_position={1 if symbol in BROKER.positions() else 0}")
+    msgs.append(f"posL={int(BROKER.has_side(symbol,'Buy'))} posS={int(BROKER.has_side(symbol,'Sell'))}")
     if META_ON:
         hit, mean_bps, mdd = _meta_stats(symbol)
         meta_block = META_BLOCK_UNTIL.get(symbol,0.0) > now
@@ -1289,7 +1481,8 @@ def _whynot(symbol: str):
     print("[WHYNOT]", symbol, " | ".join(msgs))
 
 # ===== MAIN
-maybe_apply_preset()  # honor PRESET once at import; no hidden reapply later
+maybe_apply_preset()
+
 # ==== HOT SYMBOL PICKER (Bybit v5) ====
 def find_hot_symbols(n: int = 5, min_turnover_usdt: float = 30_000_000.0) -> list[str]:
     """
@@ -1354,6 +1547,14 @@ def _clear_runtime_state():
 
 def sync_symbols_runtime():
     _clear_runtime_state()
+
+
+def _exec_taker_price(side: str, bid: float, ask: float, slip_bps: float = SLIPPAGE_BPS_TAKER) -> float:
+    s = 1.0 + slip_bps/1e4
+    if side == "Buy":
+        return ask * s
+    else:
+        return bid / s  # Sell은 bid에서 미끄러짐
 '''
 SYMBOLS = find_hot_symbols(n=5, min_turnover_usdt=100_000_000.0)  # 원하는 하한으로 조정
 # hot picker 실행 직후
@@ -1361,8 +1562,8 @@ hot = find_hot_symbols(n=5, min_turnover_usdt=1e8)
 if hot:
     SYMBOLS[:] = hot  # 또는 SYMBOLS = hot
     sync_symbols_runtime()
-
 '''
+
 def main():
     print_runtime_header()
     _log_equity(get_wallet_equity())
@@ -1374,7 +1575,6 @@ def main():
         return
 
     while True:
-
         if SCAN_PARALLEL:
             with ThreadPoolExecutor(max_workers=SCAN_WORKERS) as ex:
                 ex.map(try_enter, SYMBOLS)
