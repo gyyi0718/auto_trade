@@ -462,7 +462,7 @@ def run_hour_until_midnight(symbols: List[str], plan: Dict[str,dict]):
 
 # ===================== main =====================
 if __name__ == "__main__":
-    ckpt = env_str("HOURLY_CKPT", "D:/ygy_work/coin/multimodel/models_hourly_v3/besthour_best.ckpt")
+    ckpt = env_str("HOURLY_CKPT", "D:/ygy_work/coin/multimodel/models_hourly/besthour_best.ckpt")
     symbols = [s.strip().upper() for s in env_str("SYMBOLS","BTCUSDT,ETHUSDT").split(",") if s.strip()]
     write_plan = env_bool("WRITE_PLAN_JSON", False)
 
