@@ -1,0 +1,280 @@
+{
+  "wallet_balance": {
+    "list": [
+      {
+        "accountIMRate": "0",
+        "totalMaintenanceMarginByMp": "0",
+        "totalInitialMargin": "0",
+        "accountType": "UNIFIED",
+        "accountMMRate": "0",
+        "accountMMRateByMp": "0",
+        "accountIMRateByMp": "0",
+        "totalInitialMarginByMp": "0",
+        "totalMaintenanceMargin": "0",
+        "totalEquity": "451.95308685",
+        "totalMarginBalance": "451.69989269",
+        "totalAvailableBalance": "451.69989269",
+        "totalPerpUPL": "0",
+        "totalWalletBalance": "451.69989269",
+        "accountLTV": "0",
+        "coin": [
+          {
+            "spotBorrow": "0",
+            "availableToBorrow": "",
+            "bonus": "0",
+            "accruedInterest": "",
+            "availableToWithdraw": "",
+            "totalOrderIM": "0",
+            "equity": "0.00056",
+            "totalPositionMM": "0",
+            "usdValue": "0.00000033",
+            "unrealisedPnl": "0",
+            "collateralSwitch": false,
+            "spotHedgingQty": "0",
+            "borrowAmount": "0.000000000000000000",
+            "totalPositionIM": "0",
+            "walletBalance": "0.00056",
+            "cumRealisedPnl": "-14.21944",
+            "locked": "0",
+            "marginCollateral": false,
+            "coin": "ACS"
+          },
+          {
+            "spotBorrow": "0",
+            "availableToBorrow": "",
+            "bonus": "0",
+            "accruedInterest": "",
+            "availableToWithdraw": "",
+            "totalOrderIM": "0",
+            "equity": "5",
+            "totalPositionMM": "0",
+            "usdValue": "0.244508",
+            "unrealisedPnl": "0",
+            "collateralSwitch": false,
+            "spotHedgingQty": "0",
+            "borrowAmount": "0.000000000000000000",
+            "totalPositionIM": "0",
+            "walletBalance": "5",
+            "cumRealisedPnl": "0",
+            "locked": "0",
+            "marginCollateral": false,
+            "coin": "TA"
+          },
+          {
+            "spotBorrow": "0",
+            "availableToBorrow": "",
+            "bonus": "0",
+            "accruedInterest": "",
+            "availableToWithdraw": "",
+            "totalOrderIM": "0",
+            "equity": "0.066",
+            "totalPositionMM": "0",
+            "usdValue": "0.00465806",
+            "unrealisedPnl": "0",
+            "collateralSwitch": false,
+            "spotHedgingQty": "0",
+            "borrowAmount": "0.000000000000000000",
+            "totalPositionIM": "0",
+            "walletBalance": "0.066",
+            "cumRealisedPnl": "-0.234",
+            "locked": "0",
+            "marginCollateral": false,
+            "coin": "UXLINK"
+          },
+          {
+            "spotBorrow": "0",
+            "availableToBorrow": "",
+            "bonus": "0",
+            "accruedInterest": "",
+            "availableToWithdraw": "",
+            "totalOrderIM": "0",
+            "equity": "0.0599",
+            "totalPositionMM": "0",
+            "usdValue": "0.00105748",
+            "unrealisedPnl": "0",
+            "collateralSwitch": false,
+            "spotHedgingQty": "0",
+            "borrowAmount": "0.000000000000000000",
+            "totalPositionIM": "0",
+            "walletBalance": "0.0599",
+            "cumRealisedPnl": "-2.7401",
+            "locked": "0",
+            "marginCollateral": false,
+            "coin": "MONPRO"
+          },
+          {
+            "spotBorrow": "0",
+            "availableToBorrow": "",
+            "bonus": "0",
+            "accruedInterest": "0",
+            "availableToWithdraw": "",
+            "totalOrderIM": "0",
+            "equity": "451.5924137",
+            "totalPositionMM": "0",
+            "usdValue": "451.69989269",
+            "unrealisedPnl": "0",
+            "collateralSwitch": true,
+            "spotHedgingQty": "0",
+            "borrowAmount": "0.000000000000000000",
+            "totalPositionIM": "0",
+            "walletBalance": "451.5924137",
+            "cumRealisedPnl": "-14053.3728122",
+            "locked": "0",
+            "marginCollateral": true,
+            "coin": "USDT"
+          },
+          {
+            "spotBorrow": "0",
+            "availableToBorrow": "",
+            "bonus": "0",
+            "accruedInterest": "0",
+            "availableToWithdraw": "",
+            "totalOrderIM": "0",
+            "equity": "0.00347",
+            "totalPositionMM": "0",
+            "usdValue": "0.00283654",
+            "unrealisedPnl": "0",
+            "collateralSwitch": false,
+            "spotHedgingQty": "0",
+            "borrowAmount": "0.000000000000000000",
+            "totalPositionIM": "0",
+            "walletBalance": "0.00347",
+            "cumRealisedPnl": "-0.02653",
+            "locked": "0",
+            "marginCollateral": true,
+            "coin": "AERO"
+          },
+          {
+            "spotBorrow": "0",
+            "availableToBorrow": "",
+            "bonus": "0",
+            "accruedInterest": "0",
+            "availableToWithdraw": "",
+            "totalOrderIM": "0",
+            "equity": "0.0329",
+            "totalPositionMM": "0",
+            "usdValue": "0.00013371",
+            "unrealisedPnl": "0",
+            "collateralSwitch": false,
+            "spotHedgingQty": "0",
+            "borrowAmount": "0.000000000000000000",
+            "totalPositionIM": "0",
+            "walletBalance": "0.0329",
+            "cumRealisedPnl": "-8.0671",
+            "locked": "0",
+            "marginCollateral": true,
+            "coin": "PUMP"
+          }
+        ]
+      }
+    ]
+  },
+  "account_info": {
+    "marginMode": "REGULAR_MARGIN",
+    "updatedTime": "1761125188000",
+    "unifiedMarginStatus": 6,
+    "dcpStatus": "OFF",
+    "timeWindow": 0,
+    "smpGroup": 0,
+    "isMasterTrader": false,
+    "spotHedgingStatus": "OFF"
+  },
+  "positions": {
+    "linear": {
+      "nextPageCursor": "",
+      "category": "linear",
+      "list": []
+    },
+    "inverse": {
+      "nextPageCursor": "",
+      "category": "inverse",
+      "list": []
+    }
+  },
+  "open_orders": {
+    "linear": {
+      "BTCUSDT": {
+        "nextPageCursor": "",
+        "category": "linear",
+        "list": []
+      },
+      "ETHUSDT": {
+        "nextPageCursor": "",
+        "category": "linear",
+        "list": []
+      },
+      "SOLUSDT": {
+        "nextPageCursor": "",
+        "category": "linear",
+        "list": []
+      },
+      "DOGEUSDT": {
+        "nextPageCursor": "",
+        "category": "linear",
+        "list": []
+      },
+      "BNBUSDT": {
+        "nextPageCursor": "",
+        "category": "linear",
+        "list": []
+      },
+      "XRPUSDT": {
+        "nextPageCursor": "",
+        "category": "linear",
+        "list": []
+      },
+      "ADAUSDT": {
+        "nextPageCursor": "",
+        "category": "linear",
+        "list": []
+      }
+    },
+    "inverse": {
+      "BTCUSDT": {
+        "nextPageCursor": "",
+        "category": "inverse",
+        "list": []
+      },
+      "ETHUSDT": {
+        "nextPageCursor": "",
+        "category": "inverse",
+        "list": []
+      },
+      "SOLUSDT": {
+        "nextPageCursor": "",
+        "category": "inverse",
+        "list": []
+      },
+      "DOGEUSDT": {
+        "nextPageCursor": "",
+        "category": "inverse",
+        "list": []
+      },
+      "BNBUSDT": {
+        "nextPageCursor": "",
+        "category": "inverse",
+        "list": []
+      },
+      "XRPUSDT": {
+        "nextPageCursor": "",
+        "category": "inverse",
+        "list": []
+      },
+      "ADAUSDT": {
+        "nextPageCursor": "",
+        "category": "inverse",
+        "list": []
+      }
+    },
+    "option": {
+      "nextPageCursor": "",
+      "category": "option",
+      "list": []
+    },
+    "spot": {
+      "nextPageCursor": "",
+      "category": "spot",
+      "list": []
+    }
+  }
+}
