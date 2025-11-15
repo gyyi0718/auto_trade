@@ -1,0 +1,21 @@
+{
+  "symbol": "HIPPOUSDT",
+  "interval": "5",
+  "total_timesteps": 500000,
+  "test_stats": {
+    "final_equity": -6146.941718148875,
+    "total_return": -161.46941718148875,
+    "total_trades": 7,
+    "win_rate": 57.14285714285714,
+    "max_drawdown": 133.30604296731462,
+    "sharpe_ratio": -0.49828291936884156,
+    "total_pnl": -16109.620639857087
+  },
+  "action_distribution": {
+    "0": 97,
+    "1": 377,
+    "2": 1
+  },
+  "model_path": "rl_models_standalone/HIPPOUSDT_5min_final.zip",
+  "trained_at": "2025-11-07T10:02:21.783066"
+}

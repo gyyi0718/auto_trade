@@ -1,0 +1,29 @@
+{
+  "symbol": "FLUXUSDT",
+  "interval": "5",
+  "total_timesteps": 300000,
+  "config": {
+    "base_leverage": 10,
+    "learning_rate": 0.0003,
+    "ent_coef": 0.03,
+    "directional_weight": 0.6,
+    "min_holding": 3
+  },
+  "test_stats": {
+    "final_equity": 1829.9688049809338,
+    "total_return": -81.70031195019067,
+    "total_trades": 142,
+    "winning_trades": 77,
+    "win_rate": 54.22535211267606,
+    "direction_accuracy": 50.0,
+    "max_drawdown": 98.75349390004837,
+    "total_pnl": -8159.540576304006
+  },
+  "action_distribution": {
+    "0": 72,
+    "1": 72,
+    "2": 0
+  },
+  "model_path": "rl_models_enhanced/FLUXUSDT_5min_final.zip",
+  "trained_at": "2025-11-08T21:46:31.428008"
+}

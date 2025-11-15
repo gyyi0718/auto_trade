@@ -1,0 +1,21 @@
+{
+  "symbol": "0GUSDT",
+  "interval": "5",
+  "total_timesteps": 300000,
+  "test_stats": {
+    "final_equity": 1834.713372163012,
+    "total_return": -81.65286627836987,
+    "total_trades": 31,
+    "win_rate": 45.16129032258064,
+    "max_drawdown": 82.64289467658604,
+    "sharpe_ratio": -1.4534724094098863,
+    "total_pnl": -6671.729569604073
+  },
+  "action_distribution": {
+    "0": 155,
+    "1": 82,
+    "2": 142
+  },
+  "model_path": "rl_models_standalone/0GUSDT_5min_final.zip",
+  "trained_at": "2025-11-08T21:33:17.615452"
+}

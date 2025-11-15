@@ -43,32 +43,78 @@ MODEL_PATHS = {
     "XRPUSDT": "D:/ygy_work/coin/multimodel/models_5min_xrp/5min_2class_best.ckpt",
     "SAPIENUSDT": "D:/ygy_work/coin/multimodel/models_5min_sapien_v2/model_v2_best.pt",
     "FLMUSDT": "D:/ygy_work/coin/multimodel/models_5min_flm_v2/model_v2_best.pt",
-    "SAPIENUSDT": "D:/ygy_work/coin/multimodel/models_5min_sapien_v2/model_v2_best.pt",
+    "SAPIENUSDT": "D:/ygy_work/coin/multimodel/models_5min_sapien/5min_2class_best.ckpt",
     "TRUMPUSDT": "D:/ygy_work/coin/multimodel/models_5min_trump/5min_2class_best.ckpt",
     "JELLYJELLYUSDT": "D:/ygy_work/coin/multimodel/models_minutes_jellyjelly/5min_2class_best.ckpt",
-    "ARCUSDT":"D:/ygy_work/coin/multimodel/models_5min_arc/5min_2class_best.ckpt",
-    "DASHUSDT": "D:/ygy_work/coin/multimodel/models_5min_arc/5min_2class_best.ckpt"
+    "ARCUSDT": "D:/ygy_work/coin/multimodel/models_5min_arc/5min_2class_best.ckpt",
+    "DASHUSDT": "D:/ygy_work/coin/multimodel/models_5min_arc/5min_2class_best.ckpt",
+    "MMTUSDT": "D:/ygy_work/coin/multimodel/models_5min_mmt/5min_2class_best.ckpt",
+    "AIAUSDT": "D:/ygy_work/coin/multimodel/models_5min_aia/5min_2class_best.ckpt",
+    "GIGGLEUSDT": "D:/ygy_work/coin/multimodel/models_5min_giggle/5min_2class_best.ckpt",
+    "XNOUSDT": "D:/ygy_work/coin/multimodel/models_5min_xno/5min_2class_best.ckpt",
+    "KITEUSDT": "D:/ygy_work/coin/multimodel/models_5min_kite/5min_2class_best.ckpt",
+    "SOONUSDT": "D:/ygy_work/coin/multimodel/models_5min_soon/5min_2class_best.ckpt",
+    "ICPUSDT": "D:/ygy_work/coin/multimodel/models_5min_icp/5min_2class_best.ckpt",
+    "ARUSDT": "D:/ygy_work/coin/multimodel/models_5min_ar/5min_2class_best.ckpt",
+    "HUSDT": "D:/ygy_work/coin/multimodel/models_improved/model_h1.pt",
+    "FLUXUSDT": "D:/ygy_work/coin/multimodel/models_5min_flux/5min_2class_best.ckpt",
+    "WLFIUSDT": "D:/ygy_work/coin/multimodel/models_5min_wlfi/5min_2class_best.ckpt",
+    "MELANIAUSDT": "D:/ygy_work/coin/multimodel/models_5min_melania/5min_2class_best.ckpt",
+    "UNIUSDT": "D:/ygy_work/coin/multimodel/models_5min_uni/5min_2class_best.ckpt",
+    "LSKUSDT": "D:/ygy_work/coin/multimodel/models_5min_lsk/5min_2class_best.ckpt",
+    "XNOUSDT": "D:/ygy_work/coin/multimodel/models_5min_xno/5min_2class_best.ckpt",
+    "PARTIUSDT": "D:/ygy_work/coin/multimodel/models_5min_parti/5min_2class_best.ckpt",
+    "EVAAUSDT": "D:/ygy_work/coin/multimodel/models_5min_evaa/5min_2class_best.ckpt",
+    "RESOLVUSDT": "D:/ygy_work/coin/multimodel/models_5min_resolv/5min_2class_best.ckpt"
 
 }
-
 
 # 방법 2: 패턴 기반 자동 생성 (선택사항)
 # MODEL_DIR = "D:/ygy_work/coin/multimodel/models_5min/"
 # MODEL_PATHS = {symbol: f"{MODEL_DIR}{symbol}_best.ckpt" for symbol in SYMBOLS}
 
-CONF_THRESHOLD = float(os.getenv("CONF_THRESHOLD", "0.7"))
+CONF_THRESHOLD = float(os.getenv("CONF_THRESHOLD", "0.6"))
 USE_TESTNET = os.getenv("USE_TESTNET", "0") == "1"
 
 # 페이퍼 트레이딩 설정
 INITIAL_CAPITAL = float(os.getenv("INITIAL_CAPITAL", "1000"))  # 초기 자본 (USDT)
-POSITION_SIZE_PCT = float(os.getenv("POSITION_SIZE_PCT", "0.1"))  # 포지션 크기 (10%)
-LEVERAGE = int(os.getenv("LEVERAGE", "20"))  # 레버리지 배율
+POSITION_SIZE_PCT = float(os.getenv("POSITION_SIZE_PCT", "0.2"))  # 포지션 크기 (10%)
+LEVERAGE = int(os.getenv("LEVERAGE", "25"))  # 레버리지 배율
 MAX_POSITIONS = int(os.getenv("MAX_POSITIONS", "5"))  # 최대 동시 포지션
 STOP_LOSS_PCT = float(os.getenv("STOP_LOSS_PCT", "0.02"))  # 손절 (2%)
 TAKE_PROFIT_PCT = float(os.getenv("TAKE_PROFIT_PCT", "0.03"))  # 익절 (3%)
 MAX_HOLD_MINUTES = int(os.getenv("MAX_HOLD_MINUTES", "30"))  # 최대 보유 시간
 LIQUIDATION_BUFFER = float(os.getenv("LIQUIDATION_BUFFER", "0.8"))  # 청산 버퍼 (80%)
 TRADE_LOG_FILE = os.getenv("TRADE_LOG_FILE", "trades.json")
+
+# 🔧 가격 및 ROE 검증 설정 (ROE 2000% 버그 방지)
+MAX_PRICE_CHANGE_PCT = 50.0  # 최대 가격 변동률 50%
+MAX_ROE_LIMIT = 100.0  # ROE 상한선 ±100%
+MIN_PRICE_RATIO = 0.5  # 최소 가격 비율 (진입가 대비 50%)
+MAX_PRICE_RATIO = 2.0  # 최대 가격 비율 (진입가 대비 200%)
+KLINES_CACHE = {}
+CACHE_EXPIRY_SEC = 10  # 10초마다 갱신
+MODEL_CONFIGS = {}
+
+# ===== 가격 검증 함수 =====
+def validate_price(current_price: float, entry_price: float, symbol: str) -> tuple[bool, str]:
+    """가격 유효성 검증 - ROE 2000% 버그 방지"""
+
+    # 1. 가격이 0이거나 음수인 경우
+    if current_price <= 0:
+        return False, f"Invalid price: {current_price}"
+
+    # 2. 진입가 대비 너무 큰 변동
+    price_ratio = current_price / entry_price
+    if price_ratio < MIN_PRICE_RATIO or price_ratio > MAX_PRICE_RATIO:
+        return False, f"Abnormal price change: {price_ratio:.2%} (entry: ${entry_price:.4f}, current: ${current_price:.4f})"
+
+    # 3. 변동률 체크
+    change_pct = abs(price_ratio - 1) * 100
+    if change_pct > MAX_PRICE_CHANGE_PCT:
+        return False, f"Price change too large: {change_pct:.1f}%"
+
+    return True, ""
 
 
 # ===== 데이터 클래스 =====
@@ -99,15 +145,38 @@ class Position:
         return (pnl / self.margin) * 100
 
     def get_roe(self, current_price: float) -> float:
-        """ROE 계산 (레버리지 반영)"""
+        """ROE 계산 (레버리지 반영) - 버그 수정 버전"""
+        # 🔧 가격 검증 추가
+        is_valid, error_msg = validate_price(current_price, self.entry_price, self.symbol)
+        if not is_valid:
+            print(f"⚠️  가격 검증 실패 ({self.symbol}): {error_msg}")
+            return 0.0  # 비정상 데이터 무시
+
         if self.direction == "Long":
             price_change_pct = (current_price / self.entry_price - 1) * 100
         else:
             price_change_pct = (1 - current_price / self.entry_price) * 100
-        return price_change_pct * self.leverage
+
+        roe = price_change_pct * self.leverage
+
+        # 🔧 ROE 상한/하한 제한
+        if roe > MAX_ROE_LIMIT:
+            print(
+                f"⚠️  ROE 상한 초과 ({self.symbol}): {roe:.1f}% -> {MAX_ROE_LIMIT:.1f}% (진입: ${self.entry_price:.4f}, 현재: ${current_price:.4f})")
+            return MAX_ROE_LIMIT
+        elif roe < -MAX_ROE_LIMIT:
+            print(f"⚠️  ROE 하한 초과 ({self.symbol}): {roe:.1f}% -> {-MAX_ROE_LIMIT:.1f}%")
+            return -MAX_ROE_LIMIT
+
+        return roe
 
     def get_liquidation_distance(self, current_price: float) -> float:
         """청산가까지 거리 (%)"""
+        # 🔧 가격 검증 추가
+        if current_price <= 0:
+            print(f"⚠️  청산거리 계산 실패 ({self.symbol}): Invalid price: {current_price}")
+            return 0.0
+
         if self.direction == "Long":
             return (current_price - self.liquidation_price) / current_price * 100
         else:
@@ -115,6 +184,12 @@ class Position:
 
     def should_close(self, current_price: float, current_time: datetime) -> tuple[bool, str]:
         """청산 여부 판단"""
+        # 🔧 가격 검증
+        is_valid, error_msg = validate_price(current_price, self.entry_price, self.symbol)
+        if not is_valid:
+            print(f"⚠️  비정상 가격 감지 ({self.symbol}): {error_msg}")
+            return False, ""  # 비정상 가격일 경우 청산하지 않음
+
         # 강제 청산 (레버리지 고려)
         if self.direction == "Long" and current_price <= self.liquidation_price:
             return True, "Liquidation"
@@ -168,6 +243,7 @@ class Account:
         self.positions: Dict[str, Position] = {}
         self.trades: List[Trade] = []
         self.total_pnl = 0.0
+        self.invalid_price_count = 0  # 🔧 비정상 가격 카운터
 
     def get_available_balance(self) -> float:
         """사용 가능한 잔고 (증거금 차감)"""
@@ -188,20 +264,26 @@ class Account:
             return False
         if len(self.positions) >= MAX_POSITIONS:
             return False
-        margin_needed = self.initial_capital * POSITION_SIZE_PCT
+        margin_needed = self.balance * POSITION_SIZE_PCT
         if self.get_available_balance() < margin_needed:
             return False
         return True
 
     def open_position(self, symbol: str, direction: str, price: float):
         """포지션 진입 (레버리지 적용)"""
+        # 🔧 진입 가격 검증
+        if price <= 0:
+            print(f"⚠️  잘못된 진입가 ({symbol}): ${price:.4f} - 진입 취소")
+            return
+
         # 증거금 (실제 사용할 자금)
-        margin = self.initial_capital * POSITION_SIZE_PCT
+        margin = self.balance * POSITION_SIZE_PCT
 
         # 포지션 크기 (레버리지 적용)
         position_value = margin * LEVERAGE
         quantity = position_value / price
-
+        if quantity>200000:
+            quantity =200000
         # 손절/익절 가격 계산
         if direction == "Long":
             stop_loss = price * (1 - STOP_LOSS_PCT)
@@ -247,8 +329,18 @@ class Account:
             return
 
         position = self.positions[symbol]
+
+        # 🔧 청산 가격 검증
+        is_valid, error_msg = validate_price(exit_price, position.entry_price, symbol)
+        if not is_valid:
+            print(f"⚠️  비정상 청산가 감지 ({symbol}): {error_msg}")
+            print(f"    청산 취소 - 다음 스캔에서 재시도")
+            self.invalid_price_count += 1
+            return
+
         pnl = position.get_pnl(exit_price)
         pnl_pct = position.get_pnl_pct(exit_price)
+        roe = position.get_roe(exit_price)
         roe = position.get_roe(exit_price)
 
         # 잔고 업데이트
@@ -324,7 +416,8 @@ class Account:
             "min_roe": min(t.roe for t in self.trades),
             "liquidations": liquidations,
             "avg_win": sum(t.pnl for t in wins) / len(wins) if wins else 0,
-            "avg_loss": sum(t.pnl for t in losses) / len(losses) if losses else 0
+            "avg_loss": sum(t.pnl for t in losses) / len(losses) if losses else 0,
+            "invalid_prices": self.invalid_price_count  # 🔧 비정상 가격 카운트
         }
 
 
@@ -521,7 +614,7 @@ class BybitAPI:
             data = response.json()
 
             if data.get("retCode") == 0 and data.get("result", {}).get("list"):
-                return data["result"]["list"][0]
+                return data
             return {}
         except Exception as e:
             print(f"⚠️  Ticker 조회 실패 ({symbol}): {e}")
@@ -711,7 +804,7 @@ def generate_features(df: pd.DataFrame, feat_cols: list) -> pd.DataFrame:
 
 
 # ===== 추론 함수 (심볼별 모델 사용) =====
-def predict(symbol: str, debug: bool = False) -> dict:
+def predict(symbol: str, current_price: float = None, debug: bool = False) -> dict:
     """✅ 심볼별 모델로 추론"""
     symbol = symbol.strip()
 
@@ -725,12 +818,31 @@ def predict(symbol: str, debug: bool = False) -> dict:
     model = MODELS[symbol]
     config = MODEL_CONFIGS[symbol]
 
-    # 데이터 가져오기 (동적으로 필요한 만큼 요청)
-    # seq_len + 최대 window(120) + 여유(40) = 충분한 데이터
-    max_window = 120  # rv120, mom120, vz120 등에서 사용
-    required_length = config['seq_len'] + max_window + 40
-    limit = max(200, min(required_length, 1000))  # 최소 200, 최대 1000
-    df = API.get_klines(symbol, interval="5", limit=limit)
+    # ✅ 최적화: Klines 캐시 사용
+    current_time = time.time()
+    cache_key = symbol
+
+    # 캐시가 유효하면 사용
+    if cache_key in KLINES_CACHE:
+        cached_data, cached_time = KLINES_CACHE[cache_key]
+        if current_time - cached_time < CACHE_EXPIRY_SEC:
+            df = cached_data
+            if debug:
+                print(f"[DEBUG {symbol}] 캐시 사용 (age: {current_time - cached_time:.1f}초)")
+        else:
+            # 캐시 만료 - 새로 가져오기
+            max_window = 120
+            required_length = config['seq_len'] + max_window + 40
+            limit = max(200, min(required_length, 1000))
+            df = API.get_klines(symbol, interval="5", limit=limit)
+            KLINES_CACHE[cache_key] = (df, current_time)
+    else:
+        # 캐시 없음 - 새로 가져오기
+        max_window = 120
+        required_length = config['seq_len'] + max_window + 40
+        limit = max(200, min(required_length, 1000))
+        df = API.get_klines(symbol, interval="5", limit=limit)
+        KLINES_CACHE[cache_key] = (df, current_time)
 
     if debug:
         print(f"\n[DEBUG {symbol}] 데이터 조회 결과:")
@@ -856,8 +968,23 @@ def predict(symbol: str, debug: bool = False) -> dict:
     direction = direction_map[pred_class]
     confidence = float(probs.max())
 
-    ticker = API.get_ticker(symbol)
-    current_price = float(ticker.get("lastPrice", 0))
+    # ✅ 최적화: current_price가 전달되면 API 호출 스킵
+    if current_price is None:
+        ticker = API.get_ticker(symbol)
+        if ticker.get("retCode") == 0 and ticker.get("result", {}).get("list"):
+            current_price = float(ticker["result"]["list"][0]["lastPrice"])
+        else:
+            # Ticker 실패 시 df의 마지막 close 가격 사용
+            current_price = float(df['close'].iloc[-1])
+            if debug:
+                print(f"  - ⚠️ Ticker 조회 실패, df의 close 사용: ${current_price}")
+
+    # 가격이 0이거나 너무 작으면 에러 반환
+    if current_price <= 0 or current_price < 1e-10:
+        return {
+            "error": f"Invalid price: {current_price}",
+            "symbol": symbol
+        }
 
     return {
         "symbol": symbol,
@@ -900,6 +1027,12 @@ def print_dashboard(account: Account, prices: Dict[str, float]):
 
         for symbol, pos in account.positions.items():
             current_price = prices.get(symbol, pos.entry_price)
+
+            # 🔧 가격 유효성 검증
+            if current_price <= 0:
+                print(f"⚠️  {symbol}: 가격 데이터 없음, 진입가 사용")
+                current_price = pos.entry_price
+
             pnl = pos.get_pnl(current_price)
             roe = pos.get_roe(current_price)
             hold_min = (datetime.now() - pos.entry_time).total_seconds() / 60
@@ -953,8 +1086,9 @@ def test_api_connection():
     # Public API 테스트
     print("   테스트 심볼: BTCUSDT")
     ticker = API.get_ticker("BTCUSDT")
-    if ticker and ticker.get("lastPrice"):
-        print(f"   ✓ Ticker 조회 성공: ${float(ticker['lastPrice']):,.2f}")
+    if ticker and ticker.get("retCode") == 0 and ticker.get("result", {}).get("list"):
+        last_price = float(ticker["result"]["list"][0]["lastPrice"])
+        print(f"   ✓ Ticker 조회 성공: ${last_price:,.2f}")
     else:
         print(f"   ✗ Ticker 조회 실패")
         print(f"   응답: {ticker}")
@@ -1002,25 +1136,46 @@ def main():
             prices = {}
             for symbol in MODELS.keys():
                 ticker = API.get_ticker(symbol)
-                prices[symbol] = float(ticker.get("lastPrice", 0))
+                if ticker.get("retCode") == 0 and ticker.get("result", {}).get("list"):
+                    try:
+                        price = float(ticker["result"]["list"][0]["lastPrice"])
+                        if price > 0:  # 🔧 유효한 가격만 저장
+                            prices[symbol] = price
+                        else:
+                            print(f"⚠️  {symbol}: 가격이 0입니다. 이전 가격 유지")
+                            # 이전 가격이 있으면 유지, 없으면 skip
+                            if symbol in prices:
+                                pass  # 이전 가격 유지
+                            # 새로운 심볼이면 가격 없이 skip
+                    except (ValueError, KeyError, IndexError) as e:
+                        print(f"⚠️  {symbol}: 가격 파싱 실패 - {e}")
+                else:
+                    # 조회 실패 시 이전 가격 유지 (없으면 skip)
+                    if symbol not in prices:
+                        print(f"⚠️  {symbol}: API 조회 실패, 가격 없음")
 
             # 포지션 관리
             for symbol in list(account.positions.keys()):
                 position = account.positions[symbol]
                 current_price = prices.get(symbol, position.entry_price)
 
-                # 청산 조건 확인
+                # 🔧 가격 유효성 검증
+                if current_price <= 0:
+                    print(f"⚠️  {symbol}: 가격 데이터 없음, 청산 판단 건너뜀")
+                    continue
+
+                # ✅ 1순위: 반대 신호 체크 (즉시 청산)
+                result = predict(symbol, debug=False)
+                if "error" not in result and result.get("confidence", 0) >= CONF_THRESHOLD:
+                    signal_dir = result["direction"]
+                    if (position.direction == "Long" and signal_dir == "Short") or                             (position.direction == "Short" and signal_dir == "Long"):
+                        account.close_position(symbol, current_price, "Reverse Signal")
+                        continue  # 청산 완료, 다음 포지션으로
+
+                # 2순위: 일반 청산 조건 확인 (손절, 익절, 시간 초과 등)
                 should_close, reason = position.should_close(current_price, current_time)
                 if should_close:
                     account.close_position(symbol, current_price, reason)
-                else:
-                    # 반대 신호로 청산
-                    result = predict(symbol, debug=False)
-                    if "error" not in result and result.get("confidence", 0) >= CONF_THRESHOLD:
-                        signal_dir = result["direction"]
-                        if (position.direction == "Long" and signal_dir == "Short") or \
-                                (position.direction == "Short" and signal_dir == "Long"):
-                            account.close_position(symbol, current_price, "Reverse Signal")
 
             # 대시보드 출력
             print_dashboard(account, prices)

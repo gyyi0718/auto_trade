@@ -1,0 +1,21 @@
+{
+  "symbol": "ICPUSDT",
+  "interval": "1",
+  "total_timesteps": 100000,
+  "test_stats": {
+    "final_equity": 1381.787320086933,
+    "total_return": -86.18212679913067,
+    "total_trades": 2,
+    "win_rate": 0.0,
+    "max_drawdown": 87.53987653713514,
+    "sharpe_ratio": -7.818112103254457,
+    "total_pnl": -8609.34159081113
+  },
+  "action_distribution": {
+    "0": 5,
+    "1": 28,
+    "2": 0
+  },
+  "model_path": "rl_models_standalone/ICPUSDT_1min_final.zip",
+  "trained_at": "2025-11-07T12:01:26.466013"
+}

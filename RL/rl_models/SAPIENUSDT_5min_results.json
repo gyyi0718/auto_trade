@@ -1,0 +1,19 @@
+{
+  "symbol": "SAPIENUSDT",
+  "interval": "5",
+  "total_timesteps": 100000,
+  "train_size": 8000,
+  "test_size": 2000,
+  "training_duration_minutes": 3.6256385499999997,
+  "test_stats": {
+    "final_equity": 10000,
+    "total_return": 0.0,
+    "total_trades": 0,
+    "win_rate": 0.0,
+    "max_drawdown": 0,
+    "sharpe_ratio": NaN,
+    "total_pnl": 0
+  },
+  "model_path": "rl_models/SAPIENUSDT_5min_final.zip",
+  "trained_at": "2025-11-06T20:55:51.262230"
+}

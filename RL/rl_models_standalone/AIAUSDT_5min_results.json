@@ -1,0 +1,21 @@
+{
+  "symbol": "AIAUSDT",
+  "interval": "5",
+  "total_timesteps": 100000,
+  "test_stats": {
+    "final_equity": 1746.812525890285,
+    "total_return": -82.53187474109716,
+    "total_trades": 21,
+    "win_rate": 47.61904761904761,
+    "max_drawdown": 87.88040998550113,
+    "sharpe_ratio": -1.036416737464177,
+    "total_pnl": -7590.115593257368
+  },
+  "action_distribution": {
+    "0": 108,
+    "1": 89,
+    "2": 12
+  },
+  "model_path": "rl_models_standalone/AIAUSDT_5min_final.zip",
+  "trained_at": "2025-11-06T23:56:31.384113"
+}

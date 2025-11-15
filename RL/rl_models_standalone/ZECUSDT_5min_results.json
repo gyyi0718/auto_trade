@@ -1,0 +1,21 @@
+{
+  "symbol": "ZECUSDT",
+  "interval": "5",
+  "total_timesteps": 500000,
+  "test_stats": {
+    "final_equity": 1908.9179304927125,
+    "total_return": -80.91082069507287,
+    "total_trades": 22,
+    "win_rate": 45.45454545454545,
+    "max_drawdown": 95.59427729875549,
+    "sharpe_ratio": 0.007029482541449572,
+    "total_pnl": -7328.138633923513
+  },
+  "action_distribution": {
+    "0": 708,
+    "1": 419,
+    "2": 110
+  },
+  "model_path": "rl_models_standalone/ZECUSDT_5min_final.zip",
+  "trained_at": "2025-11-07T11:04:58.632117"
+}

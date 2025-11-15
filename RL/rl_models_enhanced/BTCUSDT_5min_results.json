@@ -1,0 +1,29 @@
+{
+  "symbol": "BTCUSDT",
+  "interval": "5",
+  "total_timesteps": 300000,
+  "config": {
+    "base_leverage": 10,
+    "learning_rate": 0.0003,
+    "ent_coef": 0.01,
+    "directional_weight": 0.6,
+    "min_holding": 3
+  },
+  "test_stats": {
+    "final_equity": 3703.4639861478804,
+    "total_return": -62.965360138521184,
+    "total_trades": 169,
+    "winning_trades": 59,
+    "win_rate": 34.9112426035503,
+    "direction_accuracy": 50.887573964497044,
+    "max_drawdown": 67.69317533752172,
+    "total_pnl": -6275.305253798776
+  },
+  "action_distribution": {
+    "0": 84,
+    "1": 85,
+    "2": 0
+  },
+  "model_path": "rl_models_enhanced/BTCUSDT_5min_final.zip",
+  "trained_at": "2025-11-08T15:29:35.278869"
+}

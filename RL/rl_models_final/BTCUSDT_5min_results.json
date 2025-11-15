@@ -1,0 +1,26 @@
+{
+  "symbol": "BTCUSDT",
+  "interval": "5",
+  "total_timesteps": 200000,
+  "train_size": 16000,
+  "test_size": 4000,
+  "training_duration_minutes": 11.11934305,
+  "test_stats": {
+    "final_equity": 10000,
+    "total_return": 0.0,
+    "total_trades": 0,
+    "win_rate": 0.0,
+    "max_drawdown": 0,
+    "sharpe_ratio": 0,
+    "total_pnl": 0
+  },
+  "action_distribution": {
+    "0": 2267,
+    "1": 1700,
+    "2": 2,
+    "3": 0
+  },
+  "trading_rate": 42.88233812043336,
+  "model_path": "rl_models_final/BTCUSDT_5min_final.zip",
+  "trained_at": "2025-11-06T21:59:12.669398"
+}

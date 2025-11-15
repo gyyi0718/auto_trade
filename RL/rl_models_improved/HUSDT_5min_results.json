@@ -1,0 +1,34 @@
+{
+  "symbol": "HUSDT",
+  "interval": "5",
+  "total_timesteps": 300000,
+  "config": {
+    "stop_loss_mult": 3.0,
+    "take_profit_mult": 4.0,
+    "base_leverage": 5,
+    "min_holding": 2,
+    "learning_rate": 0.0005,
+    "ent_coef": 0.1
+  },
+  "test_stats": {
+    "final_equity": 1871.2824181283834,
+    "total_return": -81.28717581871618,
+    "total_trades": 244,
+    "winning_trades": 111,
+    "win_rate": 45.49180327868852,
+    "max_drawdown": 83.84411733513902,
+    "total_pnl": -8123.369184046153,
+    "market_regime": "medium_vol",
+    "avg_volatility": 0.015334543261919653
+  },
+  "action_distribution": {
+    "0": 122,
+    "1": 122,
+    "2": 43
+  },
+  "avg_leverage": 4.560975609756097,
+  "avg_stop_loss": 5.767108826419642,
+  "avg_take_profit": 7.728269495801578,
+  "model_path": "rl_models_improved/HUSDT_5min_final.zip",
+  "trained_at": "2025-11-08T17:27:53.023068"
+}

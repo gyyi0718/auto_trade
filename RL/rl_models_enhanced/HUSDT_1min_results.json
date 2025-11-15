@@ -1,0 +1,29 @@
+{
+  "symbol": "HUSDT",
+  "interval": "1",
+  "total_timesteps": 300000,
+  "config": {
+    "base_leverage": 10,
+    "learning_rate": 0.0004,
+    "ent_coef": 0.04,
+    "directional_weight": 0.65,
+    "min_holding": 2
+  },
+  "test_stats": {
+    "final_equity": 1952.1234454552903,
+    "total_return": -80.47876554544709,
+    "total_trades": 48,
+    "winning_trades": 18,
+    "win_rate": 37.5,
+    "direction_accuracy": 50.0,
+    "max_drawdown": 80.47876554544709,
+    "total_pnl": -6543.650710705742
+  },
+  "action_distribution": {
+    "0": 122,
+    "1": 25,
+    "2": 0
+  },
+  "model_path": "rl_models_enhanced/HUSDT_1min_final.zip",
+  "trained_at": "2025-11-08T16:47:15.425780"
+}

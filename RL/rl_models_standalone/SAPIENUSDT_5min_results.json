@@ -1,0 +1,21 @@
+{
+  "symbol": "SAPIENUSDT",
+  "interval": "5",
+  "total_timesteps": 500000,
+  "test_stats": {
+    "final_equity": 1996.232471499845,
+    "total_return": -80.03767528500155,
+    "total_trades": 59,
+    "win_rate": 32.20338983050847,
+    "max_drawdown": 80.03767528500155,
+    "sharpe_ratio": -0.6751302924774093,
+    "total_pnl": -7521.92201931389
+  },
+  "action_distribution": {
+    "0": 256,
+    "1": 177,
+    "2": 334
+  },
+  "model_path": "rl_models_standalone/SAPIENUSDT_5min_final.zip",
+  "trained_at": "2025-11-07T00:58:12.606348"
+}

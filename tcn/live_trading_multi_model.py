@@ -3,6 +3,7 @@
 """
 TCN 모델 기반 실전 자동 트레이딩 시스템 (심볼별 모델 사용)
 ⚠️  WARNING: 실제 자금을 사용합니다. 신중하게 사용하세요!
+✅ 잔고 확인 로직 개선 버전
 """
 import os
 import time
@@ -26,8 +27,8 @@ os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
 
 # ===== CONFIG =====
 # API 인증 (필수!)
-API_KEY    = "Dlp4eJD6YFmO99T8vC"
-API_SECRET    = "YYYB5tMw2TWvfVF5wqi6lQRHqEIiDSpDJF1U"
+API_KEY = "Dlp4eJD6YFmO99T8vC"
+API_SECRET = "YYYB5tMw2TWvfVF5wqi6lQRHqEIiDSpDJF1U"
 USE_TESTNET = os.getenv("USE_TESTNET", "0") == "1"  # 기본값: Testnet
 
 if not API_KEY or not API_SECRET:
@@ -54,11 +55,10 @@ if not API_KEY or not API_SECRET:
     exit(1)
 
 # 거래 설정
-SYMBOLS_ENV = os.getenv("SYMBOLS", "").strip()
-
+SYMBOLS_ENV = os.getenv("SYMBOLS", "MELANIAUSDT").strip()
 
 INTERVAL_SEC = int(os.getenv("INTERVAL_SEC", "2"))
-CONF_THRESHOLD = float(os.getenv("CONF_THRESHOLD", "0.7"))  # 실전은 더 높게
+CONF_THRESHOLD = float(os.getenv("CONF_THRESHOLD", "0.6"))  # 실전은 더 높게
 
 # ✅ 심볼별 모델 경로 설정 (딕셔너리 형태)
 MODEL_PATHS = {
@@ -68,12 +68,23 @@ MODEL_PATHS = {
     "DOGEUSDT": "D:/ygy_work/coin/multimodel/models_5min_doge/5min_2class_best.ckpt",
     "BNBUSDT": "D:/ygy_work/coin/multimodel/models_5min_bnb/5min_2class_best.ckpt",
     "XRPUSDT": "D:/ygy_work/coin/multimodel/models_5min_xrp/5min_2class_best.ckpt",
-    "SAPIENUSDT": "D:/ygy_work/coin/multimodel/models_5min_sapien_v2/model_v2_best.pt",
+    "SAPIENUSDT": "D:/ygy_work/coin/multimodel/models_5min_sapien/5min_2class_best.ckpt",
     "FLMUSDT": "D:/ygy_work/coin/multimodel/models_5min_flm_v2/model_v2_best.pt",
     "TRUMPUSDT": "D:/ygy_work/coin/multimodel/models_5min_trump/5min_2class_best.ckpt",
     "JELLYJELLYUSDT": "D:/ygy_work/coin/multimodel/models_minutes_jellyjelly/5min_2class_best.ckpt",
     "ARCUSDT": "D:/ygy_work/coin/multimodel/models_5min_arc/5min_2class_best.ckpt",
-    "DASHUSDT": "D:/ygy_work/coin/multimodel/models_5min_dash/5min_2class_best.ckpt"
+    "DASHUSDT": "D:/ygy_work/coin/multimodel/models_5min_dash/5min_2class_best.ckpt",
+    "MMTUSDT": "D:/ygy_work/coin/multimodel/models_5min_mmt/5min_2class_best.ckpt",
+    "AIAUSDT": "D:/ygy_work/coin/multimodel/models_5min_aia/5min_2class_best.ckpt",
+    "GIGGLEUSDT": "D:/ygy_work/coin/multimodel/models_5min_giggle/5min_2class_best.ckpt",
+    "XNOUSDT": "D:/ygy_work/coin/multimodel/models_5min_xno/5min_2class_best.ckpt",
+    "SOONUSDT": "D:/ygy_work/coin/multimodel/models_5min_soon/5min_2class_best.ckpt",
+    "FLUXUSDT": "D:/ygy_work/coin/multimodel/models_5min_flux/5min_2class_best.ckpt",
+    "MELANIAUSDT": "D:/ygy_work/coin/multimodel/models_5min_melania/5min_2class_best.ckpt",
+    "UNIUSDT": "D:/ygy_work/coin/multimodel/models_5min_uni/5min_2class_best.ckpt",
+    "LSKUSDT": "D:/ygy_work/coin/multimodel/models_5min_lsk/5min_2class_best.ckpt",
+    "PARTIUSDT": "D:/ygy_work/coin/multimodel/models_5min_parti/5min_2class_best.ckpt",
+    "EVAAUSDT": "D:/ygy_work/coin/multimodel/models_5min_evaa/5min_2class_best.ckpt"
 }
 if SYMBOLS_ENV:
     # 환경변수가 설정되어 있으면 사용
@@ -82,15 +93,20 @@ else:
     # 환경변수가 없으면 MODEL_PATHS의 모든 심볼 사용
     SYMBOLS = list(MODEL_PATHS.keys())
 # 리스크 관리 (매우 중요!)
-MARGIN_PER_POSITION = float(os.getenv("MARGIN_PER_POSITION", "10"))  # 포지션당 증거금
+# ✅ 포지션당 사용할 잔고 비율 (예: 0.05 = 전체 잔고의 5%)
+POSITION_SIZE_PCT = float(os.getenv("POSITION_SIZE_PCT", "0.5"))  # 포지션당 잔고의 5%
 LEVERAGE = int(os.getenv("LEVERAGE", "20"))  # 레버리지 (실전은 낮게!)
-MAX_POSITIONS = int(os.getenv("MAX_POSITIONS", "10"))  # 최대 동시 포지션
+MAX_POSITIONS = int(os.getenv("MAX_POSITIONS", "5"))  # 최대 동시 포지션
 STOP_LOSS_PCT = float(os.getenv("STOP_LOSS_PCT", "0.02"))  # 손절 2%
 TAKE_PROFIT_PCT = float(os.getenv("TAKE_PROFIT_PCT", "0.03"))  # 익절 3%
 MAX_DAILY_LOSS = float(os.getenv("MAX_DAILY_LOSS", "500"))  # 일일 최대 손실
 MAX_HOLD_MINUTES = int(os.getenv("MAX_HOLD_MINUTES", "30"))  # 최대 보유 시간
-MIN_HOLD_MINUTES = int(os.getenv("MIN_HOLD_MINUTES", "5"))  # 최소 보유 시간 (반대 신호 청산 방지)
+MIN_HOLD_MINUTES = int(os.getenv("MIN_HOLD_MINUTES", "5"))  # 최소 보유 시간
 LIQUIDATION_BUFFER = float(os.getenv("LIQUIDATION_BUFFER", "0.8"))  # 청산 버퍼 (80%)
+
+# ✅ 새로운 설정: 안전 여유금 (Safety Buffer)
+# 사용 가능한 잔고의 일부만 사용 (예: 90% 사용, 10% 여유금)
+SAFETY_BUFFER_PCT = float(os.getenv("SAFETY_BUFFER_PCT", "0.10"))  # 10% 여유금
 
 # 포지션 모드
 POSITION_MODE = os.getenv("POSITION_MODE", "one-way").lower()  # "one-way" 또는 "hedge"
@@ -248,6 +264,10 @@ class TCN_MT(nn.Module):
 # ===== 모델 로드 =====
 print("\n🤖 심볼별 모델 로드 중...")
 MODELS = {}
+
+# ✅ Klines 캐시 (속도 최적화)
+KLINES_CACHE = {}
+CACHE_EXPIRY_SEC = 10  # 10초마다 갱신
 MODEL_CONFIGS = {}
 
 for symbol in SYMBOLS:
@@ -370,26 +390,44 @@ class BybitAPI:
         else:
             self.base_url = "https://api.bybit.com"
 
-        self.recv_window = "5000"
+        self.recv_window = "20000"  # ✅ 20초 (네트워크 지연 고려)
 
-    def _generate_signature(self, timestamp: str, params_str: str) -> str:
-        """서명 생성"""
-        # signature = HMAC_SHA256(timestamp + api_key + recv_window + params_str)
-        sign_str = timestamp + self.api_key + self.recv_window + params_str
+        # ✅ 서버 시간 동기화
+        self.time_offset = 0  # 서버와의 시간 차이 (ms)
+        self._sync_time()
 
-        if DEBUG_MODE:
-            print(f"[DEBUG] Sign string: {sign_str}")
+    def _sync_time(self):
+        """서버 시간과 로컬 시간 동기화"""
+        try:
+            response = requests.get(f"{self.base_url}/v3/public/time", timeout=5)
+            server_time = response.json()['result']['timeSecond']
+            server_time_ms = int(server_time) * 1000
+            local_time_ms = int(time.time() * 1000)
+            self.time_offset = server_time_ms - local_time_ms
 
-        signature = hmac.new(
-            bytes(self.api_secret, 'utf-8'),
-            bytes(sign_str, 'utf-8'),
-            hashlib.sha256
-        ).hexdigest()
+            if abs(self.time_offset) > 1000:  # 1초 이상 차이
+                print(
+                    f"⚠️  시간 동기화: 로컬 시간이 서버보다 {self.time_offset / 1000:.1f}초 {'느림' if self.time_offset > 0 else '빠름'}")
 
-        return signature
+        except Exception as e:
+            print(f"⚠️  시간 동기화 실패 (계속 진행): {e}")
+            self.time_offset = 0
+
+    # def _generate_signature(self, timestamp: str, params_str: str) -> str:
+    # """서명 생성"""
+    # # signature = HMAC_SHA256(timestamp + api_key + recv_window + params_str)
+    # sign_str = timestamp + self.api_key + self.recv_window + params_str
+    #     # if DEBUG_MODE:
+    # print(f"[DEBUG] Sign string: {sign_str}")
+    #     # signature = hmac.new(
+    # bytes(self.api_secret, 'utf-8'),
+    # bytes(sign_str, 'utf-8'),
+    # hashlib.sha256
+    # ).hexdigest()
+    #     # return signature
 
     def _request(self, method: str, endpoint: str, params: dict = None, sign: bool = False) -> dict:
-        """API 요청"""
+        """API 요청 (Bybit V5 API 규격)"""
         if params is None:
             params = {}
 
@@ -397,19 +435,29 @@ class BybitAPI:
             "Content-Type": "application/json"
         }
 
-        if sign:
-            timestamp = str(int(time.time() * 1000))
+        url = f"{self.base_url}{endpoint}"
+        json_body = ""  # POST용 JSON 문자열
 
-            # 파라미터 문자열 생성
+        if sign:
+            # ✅ 서버 시간과 동기화된 타임스탬프 사용
+            timestamp = str(int(time.time() * 1000) + self.time_offset)
+
+            # ✅ Bybit V5 서명 방식
             if method == "GET":
-                # GET: 쿼리 파라미터를 알파벳 순으로 정렬
-                params_str = '&'.join([f"{k}={params[k]}" for k in sorted(params.keys())]) if params else ""
+                # GET: query string으로 파라미터 전달
+                query_string = '&'.join([f"{k}={params[k]}" for k in sorted(params.keys())]) if params else ""
+                sign_payload = timestamp + self.api_key + self.recv_window + query_string
             else:
-                # POST: JSON body
-                params_str = json.dumps(params) if params else ""
+                # POST: JSON body로 파라미터 전달
+                json_body = json.dumps(params, separators=(',', ':')) if params else ""
+                sign_payload = timestamp + self.api_key + self.recv_window + json_body
 
             # 서명 생성
-            signature = self._generate_signature(timestamp, params_str)
+            signature = hmac.new(
+                bytes(self.api_secret, 'utf-8'),
+                bytes(sign_payload, 'utf-8'),
+                hashlib.sha256
+            ).hexdigest()
 
             # 헤더 설정
             headers.update({
@@ -420,30 +468,38 @@ class BybitAPI:
             })
 
             if DEBUG_MODE:
-                print(f"\n[DEBUG] {method} {endpoint}")
+                print(f"\n[DEBUG] === API Request Debug ===")
+                print(f"[DEBUG] Method: {method}")
+                print(f"[DEBUG] Endpoint: {endpoint}")
                 print(f"[DEBUG] Timestamp: {timestamp}")
                 print(f"[DEBUG] Params: {params}")
-                print(f"[DEBUG] Params str: {params_str}")
+                print(f"[DEBUG] Sign Payload: {sign_payload}")
                 print(f"[DEBUG] Signature: {signature}")
 
         try:
-            url = f"{self.base_url}{endpoint}"
-
             if method == "GET":
                 response = requests.get(url, params=params, headers=headers, timeout=10)
             elif method == "POST":
-                response = requests.post(url, json=params, headers=headers, timeout=10)
+                # ✅ 서명에 사용한 동일한 JSON 사용 (공백 없음)
+                response = requests.post(url, data=json_body, headers=headers, timeout=10)
             else:
                 raise ValueError(f"Unsupported method: {method}")
 
             if DEBUG_MODE:
-                print(f"[DEBUG] Status: {response.status_code}")
+                print(f"[DEBUG] Status Code: {response.status_code}")
                 print(f"[DEBUG] Response: {response.text[:500]}")
 
             data = response.json()
             return data
 
+        except requests.exceptions.RequestException as e:
+            print(f"❌ [ERROR] Request failed: {str(e)}")
+            return {"retCode": -1, "retMsg": f"Request error: {str(e)}"}
+        except json.JSONDecodeError as e:
+            print(f"❌ [ERROR] JSON decode failed: {str(e)}")
+            return {"retCode": -1, "retMsg": f"JSON error: {str(e)}"}
         except Exception as e:
+            print(f"❌ [ERROR] Unexpected error: {str(e)}")
             return {"retCode": -1, "retMsg": str(e)}
 
     def get_ticker(self, symbol: str) -> dict:
@@ -475,25 +531,111 @@ class BybitAPI:
         df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
         return df.sort_values("timestamp").reset_index(drop=True)
 
-    def get_balance(self) -> float:
-        """USDT 잔고 조회"""
+    def get_balance(self) -> dict:
+        """✅ 개선: 전체 잔고 및 사용 가능한 잔고 정보 반환"""
         result = self._request("GET", "/v5/account/wallet-balance", {
             "accountType": "UNIFIED"
         }, sign=True)
 
         if result.get("retCode") != 0:
-            if DEBUG_MODE:
-                print(f"[DEBUG] Balance API Error: {result}")
-            return 0.0
+            # ✅ 에러 상세 정보 출력
+            error_code = result.get("retCode", "unknown")
+            error_msg = result.get("retMsg", "unknown error")
+            print(f"\n{'=' * 60}")
+            print(f"❌ [ERROR] Balance API Failed!")
+            print(f"  - Error Code: {error_code}")
+            print(f"  - Error Message: {error_msg}")
+            print(f"  - Full Response: {result}")
+            print(f"{'=' * 60}\n")
+            return {
+                "total_balance": 0.0,
+                "available_balance": 0.0,
+                "used_margin": 0.0,
+                "total_equity": 0.0,
+                "unrealized_pnl": 0.0
+            }
 
         try:
             coins = result["result"]["list"][0]["coin"]
             usdt = next((c for c in coins if c["coin"] == "USDT"), None)
-            return float(usdt["walletBalance"]) if usdt else 0.0
+
+            if usdt:
+                # ✅ 디버그: 원본 USDT 데이터 출력
+                if DEBUG_MODE:
+                    print(f"        [DEBUG] Raw USDTdata: ")
+                    for key, value in usdt.items():
+                        print(f"  - {key}: {repr(value)}")
+
+                        # Bybit Unified Account 구조:
+                        # - walletBalance: 총 지갑 잔고 (입금액 + 실현 손익)
+                        # - availableToWithdraw: 출금 가능한 금액 (포지션 증거금 제외)
+                        # - equity: 순자산 (walletBalance + unrealized PnL)
+                        # - totalPositionIM: 포지션 초기 증거금 (사용 중인 증거금)
+
+                        # ✅ 빈 문자열 안전 처리
+
+                def safe_float(value, default=0.0):
+                    """빈 문자열이나 None을 안전하게 float로 변환"""
+                    if value == '' or value is None:
+                        return default
+                    try:
+                        return float(value)
+                    except (ValueError, TypeError):
+                        return default
+
+                wallet_balance = safe_float(usdt.get("walletBalance", 0))
+
+                # ✅ Bybit Unified Account: 여러 필드 시도
+                # 1순위: availableBalance (실제 거래 가능)
+                # 2순위: totalAvailableBalance
+                # 3순위: equity - used_margin (계산)
+                available = safe_float(usdt.get("availableBalance", 0))
+                if available == 0:
+                    available = safe_float(usdt.get("totalAvailableBalance", 0))
+
+                equity = safe_float(usdt.get("equity", 0))
+                unrealized_pnl = safe_float(usdt.get("unrealisedPnl", 0))
+                used_margin = safe_float(usdt.get("totalPositionIM", 0))
+
+                # ✅ 최후 수단: equity - used_margin로 계산
+                if available == 0 and equity > 0:
+                    available = equity - used_margin
+                    if DEBUG_MODE:
+                        print(f"  ℹ️  available 필드 없음, 계산값 사용: ${available:,.2f}")
+
+                if DEBUG_MODE:
+                    print(f"\n[DEBUG] 잔고 상세:")
+                    print(f"  - 총 지갑 잔고 (walletBalance): ${wallet_balance:,.2f}")
+                    print(f"  - 사용 가능 잔고 (availableToWithdraw): ${available:,.2f}")
+                    print(f"  - 총 순자산 (equity): ${equity:,.2f}")
+                    print(f"  - 사용 중 증거금 (totalPositionIM): ${used_margin:,.2f}")
+                    print(f"  - 미실현 손익 (unrealisedPnl): ${unrealized_pnl:+,.2f}")
+
+                return {
+                    "total_balance": wallet_balance,
+                    "available_balance": available,
+                    "used_margin": used_margin,
+                    "total_equity": equity,
+                    "unrealized_pnl": unrealized_pnl
+                }
+            else:
+                return {
+                    "total_balance": 0.0,
+                    "available_balance": 0.0,
+                    "used_margin": 0.0,
+                    "total_equity": 0.0,
+                    "unrealized_pnl": 0.0
+                }
         except (KeyError, IndexError, TypeError) as e:
             if DEBUG_MODE:
                 print(f"[DEBUG] Balance parsing error: {e}")
-            return 0.0
+            return {
+                "total_balance": 0.0,
+                "available_balance": 0.0,
+                "used_margin": 0.0,
+                "total_equity": 0.0,
+                "unrealized_pnl": 0.0
+            }
 
     def get_positions(self) -> List[Position]:
         """포지션 조회 (개선된 버전)"""
@@ -717,6 +859,197 @@ class BybitAPI:
 API = BybitAPI(API_KEY, API_SECRET, USE_TESTNET)
 
 
+def predict(symbol: str, current_price: float = None, debug: bool = False) -> dict:
+    """✅ 심볼별 모델로 추론"""
+    symbol = symbol.strip()
+
+    # 해당 심볼의 모델이 있는지 확인
+    if symbol not in MODELS:
+        return {
+            "error": f"No model for {symbol}",
+            "symbol": symbol
+        }
+
+    model = MODELS[symbol]
+    config = MODEL_CONFIGS[symbol]
+
+    # ✅ 최적화: Klines 캐시 사용
+    current_time = time.time()
+    cache_key = symbol
+
+    # 캐시가 유효하면 사용
+    if cache_key in KLINES_CACHE:
+        cached_data, cached_time = KLINES_CACHE[cache_key]
+        if current_time - cached_time < CACHE_EXPIRY_SEC:
+            df = cached_data
+            if debug:
+                print(f"[DEBUG {symbol}] 캐시 사용 (age: {current_time - cached_time:.1f}초)")
+        else:
+            # 캐시 만료 - 새로 가져오기
+            max_window = 120
+            required_length = config['seq_len'] + max_window + 40
+            limit = max(200, min(required_length, 1000))
+            df = API.get_klines(symbol, interval="5", limit=limit)
+            KLINES_CACHE[cache_key] = (df, current_time)
+    else:
+        # 캐시 없음 - 새로 가져오기
+        max_window = 120
+        required_length = config['seq_len'] + max_window + 40
+        limit = max(200, min(required_length, 1000))
+        df = API.get_klines(symbol, interval="5", limit=limit)
+        KLINES_CACHE[cache_key] = (df, current_time)
+
+    if debug:
+        print(f"\n[DEBUG {symbol}] 데이터 조회 결과:")
+        print(f"  - 요청한 limit: {limit}")
+        print(f"  - df.empty: {df.empty}")
+        print(f"  - len(df): {len(df) if not df.empty else 0}")
+        print(f"  - 필요한 길이: {config['seq_len'] + 20}")
+        print(f"  - seq_len: {config['seq_len']}")
+        if not df.empty:
+            print(f"  - df.columns: {df.columns.tolist()}")
+            print(f"  - df.head(2):\n{df.head(2)}")
+
+    if df.empty:
+        return {
+            "error": "API returned empty data",
+            "symbol": symbol
+        }
+
+    if len(df) < config['seq_len'] + 20:
+        return {
+            "error": f"Insufficient data (got {len(df)}, need {config['seq_len'] + 20})",
+            "symbol": symbol
+        }
+
+    # 특성 생성
+    df_feat = generate_features(df, config['feat_cols'])
+    df_feat = df_feat.dropna()
+
+    if debug:
+        print(f"\n[DEBUG {symbol}] 특성 생성 결과:")
+        print(f"  - 요구되는 특성 수: {len(config['feat_cols'])}")
+        print(f"  - 실제 생성된 특성 수: {len(df_feat.columns)}")
+        print(f"  - 생성된 특성: {df_feat.columns.tolist()}")
+        print(f"  - 요구되는 특성 (처음 10개): {config['feat_cols'][:10]}")
+
+        # 누락된 특성 확인
+        missing_cols = [c for c in config['feat_cols'] if c not in df_feat.columns]
+        if missing_cols:
+            print(f"  - ⚠️ 누락된 특성 ({len(missing_cols)}개): {missing_cols[:20]}")
+
+        # ✅ 특성 값 범위 확인
+        print(f"\n[DEBUG {symbol}] 특성 값 통계 (최근 데이터):")
+        print(f"  - NaN 개수: {df_feat.isna().sum().sum()}")
+        print(f"  - Inf 개수: {np.isinf(df_feat.values).sum()}")
+        print(f"  - 최솟값: {df_feat.min().min():.4f}")
+        print(f"  - 최댓값: {df_feat.max().max():.4f}")
+        print(f"  - 평균: {df_feat.mean().mean():.4f}")
+
+        # 요구되는 특성 중 처음 5개의 최근 값
+        print(f"\n  요구 특성 최근 값 (마지막 행):")
+        for col in config['feat_cols'][:5]:
+            if col in df_feat.columns:
+                val = df_feat[col].iloc[-1]
+                print(f"    {col}: {val:.6f}")
+
+    if len(df_feat) < config['seq_len']:
+        return {
+            "error": f"Insufficient features (got {len(df_feat)}, need {config['seq_len']})",
+            "symbol": symbol
+        }
+
+    if len(df_feat.columns) != len(config['feat_cols']):
+        return {
+            "error": f"Feature mismatch (got {len(df_feat.columns)}, need {len(config['feat_cols'])})",
+            "symbol": symbol
+        }
+
+    # 시퀀스 준비
+    X = df_feat.iloc[-config['seq_len']:].values
+
+    if debug:
+        print(f"\n[DEBUG {symbol}] 정규화 전 데이터:")
+        print(f"  - X shape: {X.shape}")
+        print(f"  - X 통계: min={X.min():.4f}, max={X.max():.4f}, mean={X.mean():.4f}")
+        print(f"  - scaler_mu: min={config['scaler_mu'].min():.4f}, max={config['scaler_mu'].max():.4f}")
+        print(f"  - scaler_sd: min={config['scaler_sd'].min():.4f}, max={config['scaler_sd'].max():.4f}")
+
+    # 안전한 정규화 (scaler_sd가 너무 작으면 보정)
+    safe_scaler_sd = np.maximum(config['scaler_sd'], 0.01)  # 최소 0.01
+    X = (X - config['scaler_mu']) / (safe_scaler_sd + 1e-8)
+
+    # 극단값 클리핑 (정규화 후 -10 ~ 10 범위로 제한)
+    X = np.clip(X, -10, 10)
+
+    if debug:
+        print(f"\n[DEBUG {symbol}] 정규화 후 데이터:")
+        print(f"  - X 통계: min={X.min():.4f}, max={X.max():.4f}, mean={X.mean():.4f}")
+        print(f"  - NaN 개수: {np.isnan(X).sum()}")
+        print(f"  - Inf 개수: {np.isinf(X).sum()}")
+        print(f"  - 클리핑 적용: -10 ~ 10")
+
+    X_tensor = torch.FloatTensor(X).unsqueeze(0)
+
+    # 추론
+    with torch.no_grad():
+        if config['num_classes'] == 2:
+            # Single-task (2-class)
+            logits = model(X_tensor)
+            probs = torch.softmax(logits, dim=1).squeeze().numpy()
+        else:
+            # Multi-task (3-class)
+            logits_cls, _ = model(X_tensor)
+            probs = torch.softmax(logits_cls, dim=1).squeeze().numpy()
+
+    if debug:
+        print(f"\n[DEBUG {symbol}] 모델 출력:")
+        if config['num_classes'] == 2:
+            print(f"  - logits: [{logits.squeeze()[0]:.4f}, {logits.squeeze()[1]:.4f}]")
+        else:
+            print(
+                f"  - logits: [{logits_cls.squeeze()[0]:.4f}, {logits_cls.squeeze()[1]:.4f}, {logits_cls.squeeze()[2]:.4f}]")
+        print(f"  - probs: {probs}")
+        print(f"  - confidence: {probs.max():.6f}")
+
+    pred_class = int(probs.argmax())
+
+    # 방향 매핑
+    if config['num_classes'] == 2:
+        direction_map = {0: "Short", 1: "Long"}
+    else:
+        direction_map = {0: "Short", 1: "Flat", 2: "Long"}
+
+    direction = direction_map[pred_class]
+    confidence = float(probs.max())
+
+    # ✅ 최적화: current_price가 전달되면 API 호출 스킵
+    if current_price is None:
+        ticker = API.get_ticker(symbol)
+        if ticker.get("retCode") == 0 and ticker.get("result", {}).get("list"):
+            current_price = float(ticker["result"]["list"][0]["lastPrice"])
+        else:
+            # Ticker 실패 시 df의 마지막 close 가격 사용
+            current_price = float(df['close'].iloc[-1])
+            if debug:
+                print(f"  - ⚠️ Ticker 조회 실패, df의 close 사용: ${current_price}")
+
+    # 가격이 0이거나 너무 작으면 에러 반환
+    if current_price <= 0 or current_price < 1e-10:
+        return {
+            "error": f"Invalid price: {current_price}",
+            "symbol": symbol
+        }
+
+    return {
+        "symbol": symbol,
+        "direction": direction,
+        "confidence": confidence,
+        "current_price": current_price,
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    }
+
+
 # ===== 포지션 관리자 =====
 class PositionManager:
     """포지션 관리 클래스"""
@@ -734,26 +1067,62 @@ class PositionManager:
             self.daily_pnl = 0.0
             self.daily_reset_time = current_date
 
-    def can_open_position(self, symbol: str, current_positions: List[Position]) -> bool:
-        """포지션 진입 가능 여부"""
-        # 이미 해당 심볼 포지션이 있는지 확인
-        if any(p.symbol == symbol for p in current_positions):
-            return False
+    def can_open_position(self, symbol: str, direction: str, current_positions: List[Position],
+                          available_balance: float) -> tuple[bool, str]:
+        """✅ 개선: 포지션 진입 가능 여부 (잔고 확인 추가)"""
+        # 같은 심볼의 기존 포지션 확인
+        existing = next((p for p in current_positions if p.symbol == symbol), None)
+
+        if existing:
+            # 같은 방향이면 진입하지 않음 (기존 포지션 유지)
+            if existing.direction == direction:
+                if DEBUG_MODE:
+                    print(f"ℹ️  {symbol}: 같은 방향 포지션 이미 보유 중 ({direction}) - 유지")
+                return False, "same_direction"
+            # 반대 방향이면 진입 가능 (메인 루프에서 청산 처리)
+            return True, "ok"
 
         # 최대 포지션 수 확인
         if len(current_positions) >= MAX_POSITIONS:
-            return False
+            return False, f"max_positions ({MAX_POSITIONS})"
 
         # 일일 손실 한도 확인
         if abs(self.daily_pnl) >= MAX_DAILY_LOSS:
-            print(f"⚠️  일일 손실 한도 도달: ${self.daily_pnl:.2f}")
-            return False
+            return False, f"daily_loss_limit (${self.daily_pnl:.2f})"
 
-        return True
+        # ✅ 새로운 체크: 사용 가능한 잔고 확인
+        # 안전 버퍼를 고려한 실제 사용 가능한 금액
+        safe_available = available_balance * (1 - SAFETY_BUFFER_PCT)
 
-    def open_position(self, symbol: str, direction: str, price: float) -> bool:
-        """포지션 진입"""
+        # ✅ 퍼센트 기반으로 증거금 계산
+        margin_to_use = safe_available * POSITION_SIZE_PCT
+
+        if margin_to_use > safe_available:
+            return False, f"insufficient_balance (필요: ${margin_to_use:.2f}, 사용가능: ${safe_available:.2f})"
+
+        return True, "ok"
+
+    def open_position(self, symbol: str, direction: str, price: float, available_balance: float) -> bool:
+        """✅ 개선: 포지션 진입 (잔고 재확인 추가)"""
         try:
+            # 가격 유효성 검사
+            if price <= 0 or price is None or not np.isfinite(price):
+                print(f"❌ {symbol}: 유효하지 않은 가격 (${price})")
+                return False
+
+            # ✅ 중요: 포지션 진입 전 잔고 재확인
+            safe_available = available_balance * (1 - SAFETY_BUFFER_PCT)
+
+            # ✅ 퍼센트 기반으로 증거금 계산
+            margin_to_use = safe_available * POSITION_SIZE_PCT
+
+            if margin_to_use > safe_available:
+                print(f"❌ {symbol}: 잔고 부족")
+                print(f"   계산된 증거금 ({POSITION_SIZE_PCT * 100:.1f}%): ${margin_to_use:.2f}")
+                print(f"   사용 가능 (안전버퍼 {SAFETY_BUFFER_PCT * 100:.0f}% 제외): ${safe_available:.2f}")
+                print(f"   💡 다른 포지션을 닫거나 POSITION_SIZE_PCT를 낮춰보세요")
+                return False
+
             # 레버리지 설정 (실패 시 경고만 출력하고 계속 진행)
             success, msg = API.set_leverage(symbol, LEVERAGE)
             if not success:
@@ -767,11 +1136,12 @@ class PositionManager:
             # 심볼 정보 조회
             instrument_info = API.get_instrument_info(symbol)
             min_qty = instrument_info["minOrderQty"]
+            max_qty = instrument_info["maxOrderQty"]
             qty_step = instrument_info["qtyStep"]
             min_notional = instrument_info["minNotionalValue"]
 
             # 포지션 크기 계산
-            position_value = MARGIN_PER_POSITION * LEVERAGE
+            position_value = margin_to_use * LEVERAGE
             qty = position_value / price
 
             # 최소 주문 금액 확인
@@ -784,7 +1154,8 @@ class PositionManager:
             if qty < min_qty:
                 print(f"❌ {symbol}: 수량 부족 ({qty:.4f} < {min_qty:.4f})")
                 return False
-
+            if qty > 20000:
+                qty = 20000
             # ✅ 개선: qty를 step 단위로 올림 (반올림이 아닌 올림)
             # 이렇게 하면 반올림 후 최소 수량보다 작아지는 문제 방지
             import math
@@ -806,6 +1177,17 @@ class PositionManager:
             if qty < min_qty:
                 print(f"❌ {symbol}: 반올림 후 수량 부족 ({qty:.4f} < {min_qty:.4f})")
                 return False
+            # ✅ 최대 수량 제한 (step 단위로 조정)
+            if qty > max_qty:
+                import math
+                # max_qty를 초과하지 않도록 step 단위로 내림
+                steps = math.floor(max_qty / qty_step)
+                qty = steps * qty_step
+                # 소수점 정밀도 재조정
+                qty = round(qty, decimals)
+                print(f"⚠️  {symbol}: 수량이 최대치를 초과하여 조정됨")
+                print(f"   조정 전: {position_value / price:.4f}")
+                print(f"   조정 후: {qty:.4f} (max: {max_qty})")
 
             # 최종 주문 금액 재확인
             final_notional = qty * price
@@ -848,7 +1230,7 @@ class PositionManager:
                 self.positions_entry_time[symbol] = datetime.now()
 
                 print(f"🟢 포지션 진입: {symbol} | {direction} | ${price:,.4f} | 수량: {qty} | "
-                      f"레버리지: {LEVERAGE}x | 증거금: ${MARGIN_PER_POSITION}")
+                      f"레버리지: {LEVERAGE}x | 증거금: ${margin_to_use}")
                 print(f"   📍 SL: ${stop_loss:,.4f} ({-STOP_LOSS_PCT * 100:.1f}%) | "
                       f"TP: ${take_profit:,.4f} ({TAKE_PROFIT_PCT * 100:.1f}%)")
 
@@ -960,7 +1342,9 @@ class PositionManager:
                 "min_pnl": 0,
                 "max_roe": 0,
                 "min_roe": 0,
-                "liquidations": 0
+                "liquidations": 0,
+                "avg_win": 0,
+                "avg_loss": 0
             }
 
         wins = [t for t in self.trades if t.pnl > 0]
@@ -974,10 +1358,14 @@ class PositionManager:
             "win_rate": (len(wins) / len(self.trades) * 100) if self.trades else 0,
             "avg_pnl": sum(t.pnl for t in self.trades) / len(self.trades),
             "avg_roe": sum(t.roe for t in self.trades) / len(self.trades),
-            "max_pnl": max(t.pnl for t in self.trades),
-            "min_pnl": min(t.pnl for t in self.trades),
-            "max_roe": max(t.roe for t in self.trades),
-            "min_roe": min(t.roe for t in self.trades),
+            # 최대 수익: 승리한 거래에서만 계산
+            "max_pnl": max(t.pnl for t in wins) if wins else 0,
+            # 최대 손실: 손실 거래에서만 계산
+            "min_pnl": min(t.pnl for t in losses) if losses else 0,
+            # 최대 ROE: 승리한 거래에서만 계산
+            "max_roe": max(t.roe for t in wins) if wins else 0,
+            # 최소 ROE: 손실 거래에서만 계산
+            "min_roe": min(t.roe for t in losses) if losses else 0,
             "avg_win": sum(t.pnl for t in wins) / len(wins) if wins else 0,
             "avg_loss": sum(t.pnl for t in losses) / len(losses) if losses else 0,
             "liquidations": len(liquidations)
@@ -987,104 +1375,15 @@ class PositionManager:
 manager = PositionManager()
 
 
-# ===== 예측 함수 =====
-def predict(symbol: str, debug: bool = False) -> dict:
+# ===== 나머지 코드 (특성 생성 함수, 예측 함수 등)는 원본과 동일 =====
+# 파일이 너무 길어서 여기서는 주요 변경 부분만 표시했습니다.
+# 실제로는 원본 파일의 나머지 부분을 그대로 복사해야 합니다.
+
+def generate_features(df: pd.DataFrame, feat_cols: list) -> pd.DataFrame:
     """
-    심볼별 모델로 예측 수행
-
-    Returns:
-        dict: {
-            "direction": "Long" | "Short" | "Flat",
-            "confidence": 0.0~1.0,
-            "current_price": float,
-            "probabilities": [p_flat, p_long, p_short]
-        }
+    학습 시 사용한 make_features와 완전히 동일한 로직
+    train_tcn_5minutes.py의 make_features 함수 기반
     """
-    if symbol not in MODELS:
-        return {"error": f"모델 없음: {symbol}"}
-
-    try:
-        model = MODELS[symbol]
-        config = MODEL_CONFIGS[symbol]
-
-        # 데이터 가져오기
-        df = API.get_klines(symbol, interval="5", limit=config['seq_len'] + 50)
-        if len(df) < config['seq_len']:
-            return {"error": f"데이터 부족 ({len(df)}/{config['seq_len']})"}
-
-        # 피처 계산
-        df = calculate_features(df)
-
-        # 최근 seq_len 구간 추출
-        recent = df[config['feat_cols']].iloc[-config['seq_len']:].copy()
-
-        # 정규화
-        if config['scaler_mu'] is not None and config['scaler_sd'] is not None:
-            recent = (recent - config['scaler_mu']) / (config['scaler_sd'] + 1e-8)
-
-        # 텐서 변환
-        X = torch.FloatTensor(recent.values).unsqueeze(0)  # (1, seq_len, n_features)
-
-        # 예측
-        with torch.no_grad():
-            if config['is_single_task']:
-                logits = model(X)
-            else:
-                logits, _ = model(X)
-
-            probs = torch.softmax(logits, dim=1).squeeze().numpy()
-
-        # 결과 해석 (클래스 수에 따라 다르게 처리)
-        num_classes = config['num_classes']
-
-        if num_classes == 2:
-            # 2-class 모델: [Long, Short]
-            direction_map = {0: "Long", 1: "Short"}
-            pred_class = int(probs.argmax())
-            direction = direction_map[pred_class]
-            confidence = float(probs[pred_class])
-
-            # 3-class 형식으로 변환 (호환성을 위해)
-            probs_3class = np.array([0.0, probs[0], probs[1]])  # [Flat=0, Long, Short]
-
-        elif num_classes == 3:
-            # 3-class 모델: [Flat, Long, Short]
-            direction_map = {0: "Flat", 1: "Long", 2: "Short"}
-            pred_class = int(probs.argmax())
-            direction = direction_map[pred_class]
-            confidence = float(probs[pred_class])
-            probs_3class = probs
-
-        else:
-            return {"error": f"지원하지 않는 클래스 수: {num_classes}"}
-
-        current_price = float(df['close'].iloc[-1])
-
-        if debug:
-            print(f"\n[DEBUG] {symbol} 예측")
-            print(f"   모델 타입: {num_classes}-class")
-            print(f"   데이터: {len(df)}개 캔들")
-            print(f"   현재가: ${current_price:,.4f}")
-            if num_classes == 2:
-                print(f"   확률: Long={probs[0]:.1%}, Short={probs[1]:.1%}")
-            else:
-                print(f"   확률: Flat={probs[0]:.1%}, Long={probs[1]:.1%}, Short={probs[2]:.1%}")
-            print(f"   결과: {direction} ({confidence:.1%})")
-
-        return {
-            "direction": direction,
-            "confidence": confidence,
-            "current_price": current_price,
-            "probabilities": probs_3class.tolist(),
-            "num_classes": num_classes
-        }
-
-    except Exception as e:
-        return {"error": str(e)}
-
-
-def calculate_features(df: pd.DataFrame) -> pd.DataFrame:
-    """기술적 지표 계산 (학습 코드와 동일)"""
     g = df.copy()
 
     # ===== 기본 수익률 =====
@@ -1115,7 +1414,8 @@ def calculate_features(df: pd.DataFrame) -> pd.DataFrame:
 
     # 4. 거래량-가격 상관관계
     for w in [8, 20]:
-        g[f"vol_price_corr{w}"] = g["ret1"].rolling(w).corr(g["vol_spike"]).fillna(0.0)
+        vol_ret_corr = g["ret1"].rolling(w).corr(g["vol_spike"])
+        g[f"vol_price_corr{w}"] = vol_ret_corr.fillna(0.0)
 
     # ===== ATR =====
     prev_close = g["close"].shift(1)
@@ -1155,7 +1455,7 @@ def calculate_features(df: pd.DataFrame) -> pd.DataFrame:
         g[f"above_ma{w}"] = ((g["close"] > ma).astype(float) - 0.5) * 2
         g[f"above_ma{w}"] = g[f"above_ma{w}"].fillna(0.0)
 
-    # ===== RSI =====
+    # ===== RSI (정규화됨!) =====
     for w in [14, 28]:
         delta = g["close"].diff()
         gain = delta.clip(lower=0)
@@ -1163,36 +1463,40 @@ def calculate_features(df: pd.DataFrame) -> pd.DataFrame:
         avg_gain = gain.rolling(w, min_periods=w // 2).mean()
         avg_loss = loss.rolling(w, min_periods=w // 2).mean()
         rs = avg_gain / (avg_loss + 1e-10)
+        # 중요: -1 ~ 1 범위로 정규화!
         g[f"rsi{w}"] = (100 - (100 / (1 + rs)) - 50) / 50
         g[f"rsi{w}"] = g[f"rsi{w}"].fillna(0.0)
 
-    # ===== MACD =====
+    # ===== MACD (가격으로 정규화됨!) =====
     ema12 = g["close"].ewm(span=12, adjust=False).mean()
     ema26 = g["close"].ewm(span=26, adjust=False).mean()
+    # 중요: 가격으로 나눔!
     g["macd"] = ((ema12 - ema26) / g["close"]).fillna(0.0)
     g["macd_signal"] = g["macd"].ewm(span=9, adjust=False).mean().fillna(0.0)
     g["macd_hist"] = (g["macd"] - g["macd_signal"]).fillna(0.0)
 
-    # ===== 볼린저 밴드 =====
+    # ===== 볼린저 밴드 (상대값!) =====
     for w in [20]:
         ma = g["close"].rolling(w, min_periods=w // 2).mean()
         std = g["close"].rolling(w, min_periods=w // 2).std()
+        # 중요: 상대값으로 변환!
         g[f"bb_upper{w}"] = ((ma + 2 * std - g["close"]) / g["close"]).fillna(0.0)
         g[f"bb_lower{w}"] = ((g["close"] - (ma - 2 * std)) / g["close"]).fillna(0.0)
         g[f"bb_width{w}"] = ((4 * std) / ma).fillna(0.0)
 
     # ===== 시간 패턴 =====
-    hod = g["timestamp"].dt.hour
-    g["hod_sin"] = np.sin(2 * np.pi * hod / 24.0)
-    g["hod_cos"] = np.cos(2 * np.pi * hod / 24.0)
+    if 'timestamp' in g.columns:
+        hod = pd.to_datetime(g["timestamp"]).dt.hour
+        g["hod_sin"] = np.sin(2 * np.pi * hod / 24.0)
+        g["hod_cos"] = np.cos(2 * np.pi * hod / 24.0)
 
-    for h in [0, 6, 12, 18]:
-        g[f"hour_{h}"] = (hod == h).astype(float)
+        for h in [0, 6, 12, 18]:
+            g[f"hour_{h}"] = (hod == h).astype(float)
 
-    dow = g["timestamp"].dt.dayofweek
-    g["dow_sin"] = np.sin(2 * np.pi * dow / 7.0)
-    g["dow_cos"] = np.cos(2 * np.pi * dow / 7.0)
-    g["is_weekend"] = (dow >= 5).astype(float)
+        dow = pd.to_datetime(g["timestamp"]).dt.dayofweek
+        g["dow_sin"] = np.sin(2 * np.pi * dow / 7.0)
+        g["dow_cos"] = np.cos(2 * np.pi * dow / 7.0)
+        g["is_weekend"] = (dow >= 5).astype(float)
 
     # ===== 최근 극값 =====
     for w in [8, 24, 48]:
@@ -1201,31 +1505,49 @@ def calculate_features(df: pd.DataFrame) -> pd.DataFrame:
         g[f"price_vs_high{w}"] = ((g["close"] - recent_high) / recent_high).fillna(0.0)
         g[f"price_vs_low{w}"] = ((g["close"] - recent_low) / recent_low).fillna(0.0)
 
-    return g.dropna()
+    # ===== Feature 이상치 클리핑 (학습 시와 동일) =====
+    for feat in feat_cols:
+        if feat in g.columns and feat not in ['hod_sin', 'hod_cos', 'dow_sin', 'dow_cos']:
+            q01 = g[feat].quantile(0.01)
+            q99 = g[feat].quantile(0.99)
+            g[feat] = g[feat].clip(q01, q99)
+
+    # ===== 특성 리스트 순서대로 반환 =====
+    return g[feat_cols]
 
 
 # ===== 대시보드 =====
-def print_dashboard(balance: float, positions: List[Position], prices: Dict[str, float]):
-    """대시보드 출력 (개선된 버전)"""
+def print_dashboard(balance_info: dict, positions: List[Position], prices: Dict[str, float]):
+    """✅ 개선: 대시보드 출력 (새로운 balance 구조 반영)"""
     os.system('cls' if os.name == 'nt' else 'clear')
 
     print("\n" + "=" * 140)
     print(f"{'📊 실전 트레이딩 대시보드':^140}")
     print("=" * 140)
 
-    # 계좌 정보
-    used_margin = sum(p.margin for p in positions)
-    unrealized_pnl = sum(p.unrealized_pnl for p in positions)
-    total_value = balance + unrealized_pnl
-    available = balance - used_margin
+    # 계좌 정보 (새로운 balance_info 구조 사용)
+    total_balance = balance_info.get("total_balance", 0.0)
+    available_balance = balance_info.get("available_balance", 0.0)
+    used_margin = balance_info.get("used_margin", 0.0)
+    total_equity = balance_info.get("total_equity", 0.0)
+    unrealized_pnl = balance_info.get("unrealized_pnl", 0.0)
+
+    # 안전 버퍼 고려한 실제 사용 가능 금액
+    safe_available = available_balance * (1 - SAFETY_BUFFER_PCT)
+    margin_to_use = safe_available * POSITION_SIZE_PCT
 
     print(f"\n💰 계좌 정보")
-    print(f"   총 잔고:       ${balance:>12,.2f}")
-    print(f"   사용 증거금:   ${used_margin:>12,.2f}")
-    print(f"   가용 잔고:     ${available:>12,.2f}")
-    print(f"   평가 손익:     ${unrealized_pnl:>+12,.2f}")
-    print(f"   총 자산:       ${total_value:>12,.2f}")
-    print(f"   일일 실현손익: ${manager.daily_pnl:>+12,.2f}")
+    print(f"   총 지갑 잔고:         ${total_balance:>12,.2f}")
+    print(f"   총 순자산 (Equity):   ${total_equity:>12,.2f}")
+    print(f"   사용 중 증거금:       ${used_margin:>12,.2f}")
+    print(f"   출금 가능 잔고:       ${available_balance:>12,.2f}")
+    print(f"   실사용 가능 잔고:     ${safe_available:>12,.2f}  (안전버퍼 {SAFETY_BUFFER_PCT * 100:.0f}% 제외)")
+    print(f"   미실현 손익:          ${unrealized_pnl:>+12,.2f}")
+    print(f"   일일 실현 손익:       ${manager.daily_pnl:>+12,.2f}")
+
+    # 경고 메시지
+    if safe_available < margin_to_use:
+        print(f"   ⚠️  사용 가능 잔고 부족! (필요: ${margin_to_use:.2f}, 잔고의 {POSITION_SIZE_PCT * 100:.1f}%)")
 
     # 포지션
     if positions:
@@ -1268,8 +1590,15 @@ def print_dashboard(balance: float, positions: List[Position], prices: Dict[str,
             print(f"   강제 청산:     {stats['liquidations']:>3}회 💀")
         print(f"   평균 손익:     ${stats['avg_pnl']:>+12,.2f}")
         print(f"   평균 ROE:      {stats['avg_roe']:>+6.1f}%")
-        print(f"   최대 수익:     ${stats['max_pnl']:>12,.2f}  (ROE: {stats['max_roe']:>+6.1f}%)")
-        print(f"   최대 손실:     ${stats['min_pnl']:>12,.2f}  (ROE: {stats['min_roe']:>+6.1f}%)")
+
+        # 최대 수익: 승리가 있을 때만 표시
+        if stats['wins'] > 0:
+            print(f"   최대 수익:     ${stats['max_pnl']:>12,.2f}  (ROE: {stats['max_roe']:>+6.1f}%)")
+
+        # 최대 손실: 손실이 있을 때만 표시
+        if stats['losses'] > 0:
+            print(f"   최대 손실:     ${stats['min_pnl']:>12,.2f}  (ROE: {stats['min_roe']:>+6.1f}%)")
+
         if stats['wins'] > 0 and stats['losses'] > 0:
             rr = abs(stats['avg_win'] / stats['avg_loss'])
             print(f"   Risk/Reward:   {rr:>6.2f}")
@@ -1300,11 +1629,22 @@ def test_api_connection():
         return False
 
     # Private API 테스트
-    balance = API.get_balance()
-    if balance >= 0:
-        print(f"   ✓ 잔고 조회 성공: ${balance:,.2f} USDT")
-        if balance == 0:
+    balance_info = API.get_balance()
+    total_balance = balance_info.get("total_balance", -1)
+    available_balance = balance_info.get("available_balance", 0)
+
+    # 안전 버퍼 고려한 실제 사용 가능 금액 및 포지션당 증거금 계산
+    safe_available = available_balance * (1 - SAFETY_BUFFER_PCT)
+    margin_to_use = safe_available * POSITION_SIZE_PCT
+
+    if total_balance >= 0:
+        print(f"   ✓ 잔고 조회 성공:")
+        print(f"      - 총 잔고: ${total_balance:,.2f} USDT")
+        print(f"      - 사용 가능: ${available_balance:,.2f} USDT")
+        if total_balance == 0:
             print(f"   ⚠️  잔고가 0입니다. 입금 후 거래를 시작하세요.")
+        elif available_balance < margin_to_use:
+            print(f"   ⚠️  사용 가능 잔고가 부족합니다 (필요: ${margin_to_use:.2f}, 잔고의 {POSITION_SIZE_PCT * 100:.1f}%)")
     else:
         print(f"   ✗ 잔고 조회 실패")
         print(f"\n   확인 사항:")
@@ -1360,11 +1700,11 @@ def main():
     print("\n거래 설정:")
     print(f"   - 포지션 모드: {POSITION_MODE.upper()}")
     print(f"   - 레버리지: {LEVERAGE}x")
-    print(f"   - 증거금/포지션: ${MARGIN_PER_POSITION}")
-    print(f"   - 포지션 크기: ${MARGIN_PER_POSITION * LEVERAGE} (증거금 × 레버리지)")
+    print(f"   - 포지션 크기: 잔고의 {POSITION_SIZE_PCT * 100:.1f}% (안전버퍼 제외)")
     print(f"   - 최대 포지션: {MAX_POSITIONS}개")
     print(f"   - 일일 최대 손실: ${MAX_DAILY_LOSS}")
     print(f"   - 신뢰도 임계값: {CONF_THRESHOLD:.0%}")
+    print(f"   - 반대 신호 청산: 즉시 청산 후 전환 (공격적)")
     print(f"   - 사용 모델: {len(MODELS)}개 심볼별 모델")
 
     # 확인
@@ -1394,8 +1734,9 @@ def main():
             # 일일 통계 리셋
             manager.reset_daily_stats()
 
-            # 계좌 정보
-            balance = API.get_balance()
+            # ✅ 개선: 계좌 정보 (상세한 잔고 정보 포함)
+            balance_info = API.get_balance()
+            available_balance = balance_info.get("available_balance", 0.0)
             positions = API.get_positions()
 
             # 현재 가격 가져오기 (모델이 있는 심볼만)
@@ -1471,12 +1812,64 @@ def main():
                     if not any(p.symbol == old_pos.symbol for p in new_positions):
                         print(f"\n🔔 {old_pos.symbol} 포지션이 사라졌습니다!")
                         print(f"   💡 Bybit가 TP/SL을 자동 실행했을 가능성이 있습니다")
-                        print(f"   📊 Bybit 웹사이트 > Orders > Closed에서 확인하세요")
+
+                        # ✅ 손익 계산 및 기록
+                        try:
+                            # 현재가 조회
+                            ticker = API.get_ticker(old_pos.symbol)
+                            if ticker.get("retCode") == 0 and ticker["result"]["list"]:
+                                current_price = float(ticker["result"]["list"][0]["lastPrice"])
+                            else:
+                                current_price = old_pos.entry_price  # 조회 실패 시 진입가 사용
+
+                            # 손익 계산
+                            pnl = old_pos.get_pnl(current_price)
+                            roe = old_pos.get_roe(current_price)
+
+                            # ✅ daily_pnl에 반영 (가장 중요!)
+                            manager.daily_pnl += pnl
+
+                            # 거래 기록 저장
+                            entry_time_str = manager.positions_entry_time.get(old_pos.symbol, old_pos.entry_time)
+                            if isinstance(entry_time_str, datetime):
+                                entry_time_str = entry_time_str.strftime("%Y-%m-%d %H:%M:%S")
+                            else:
+                                entry_time_str = str(entry_time_str)
+
+                            exit_time = datetime.now()
+                            trade = Trade(
+                                symbol=old_pos.symbol,
+                                direction=old_pos.direction,
+                                entry_price=old_pos.entry_price,
+                                exit_price=current_price,
+                                size=old_pos.size,
+                                leverage=old_pos.leverage,
+                                margin=old_pos.margin,
+                                entry_time=entry_time_str,
+                                exit_time=exit_time.strftime("%Y-%m-%d %H:%M:%S"),
+                                pnl=pnl,
+                                pnl_pct=old_pos.get_pnl_pct(current_price),
+                                roe=roe,
+                                exit_reason="Bybit Auto Close (TP/SL)"
+                            )
+                            manager.trades.append(trade)
+
+                            # 진입 시간 삭제
+                            if old_pos.symbol in manager.positions_entry_time:
+                                del manager.positions_entry_time[old_pos.symbol]
+
+                            emoji = "🟢" if pnl > 0 else "🔴"
+                            print(f"   {emoji} 손익 기록: ${pnl:+,.2f} (ROE: {roe:+.1f}%)")
+                            print(f"   📊 Bybit 웹사이트 > Orders > Closed에서 확인하세요")
+
+                        except Exception as e:
+                            print(f"   ⚠️  손익 계산 실패: {e}")
+                            print(f"   수동으로 Bybit에서 확인하세요")
 
             positions = new_positions
 
             # 대시보드 출력
-            print_dashboard(balance, positions, prices)
+            print_dashboard(balance_info, positions, prices)
 
             # 신호 스캔 테이블
             print(f"\n🔍 신호 스캔 ({len(MODELS)}개 심볼)")
@@ -1486,7 +1879,9 @@ def main():
             # 신호 스캔 및 진입 (모델이 있는 심볼만)
             debug_mode = (loop_count == 1)  # 첫 스캔만 디버그 모드
             for symbol in MODELS.keys():
-                result = predict(symbol, debug=debug_mode)
+                # ✅ 최적화: 이미 가져온 가격 전달 (API 호출 1회 절약)
+                current_price = prices.get(symbol)
+                result = predict(symbol, current_price=current_price, debug=debug_mode)
 
                 if "error" in result:
                     print(f"{symbol:^12} | {'N/A':^12} | {'오류':^10} | {'N/A':^8} | ❌ {result.get('error', '알 수 없음')}")
@@ -1496,27 +1891,92 @@ def main():
                 confidence = result["confidence"]
                 price = result["current_price"]
 
+                # 가격이 0이면 스킵
+                if price <= 0:
+                    print(f"{symbol:^12} | {'가격조회실패':^12} | {'오류':^10} | {'N/A':^8} | ❌ 가격 조회 실패")
+                    continue
+
+                # 기존 포지션 확인
+                existing = next((p for p in positions if p.symbol == symbol), None)
+                position_status = ""
+                if existing:
+                    if existing.direction == direction:
+                        position_status = f" [보유: {existing.direction}]"
+                    else:
+                        position_status = f" [전환: {existing.direction}→{direction}]"
+
                 # 방향 이모지
                 dir_icon = {"Long": "📈", "Short": "📉", "Flat": "➖"}.get(direction, "❓")
 
                 # 신호 판단
                 if confidence < CONF_THRESHOLD:
-                    signal = f"⚠️  신호 약함 ({confidence:.1%})"
+                    signal = f"⚠️  신호 약함 ({confidence:.1%}){position_status}"
                 elif direction == "Long":
-                    signal = f"🟢 매수 신호 ({confidence:.1%})"
+                    signal = f"🟢 매수 신호 ({confidence:.1%}){position_status}"
                 elif direction == "Short":
-                    signal = f"🔴 매도 신호 ({confidence:.1%})"
+                    signal = f"🔴 매도 신호 ({confidence:.1%}){position_status}"
                 else:
-                    signal = f"⚪ 관망 ({confidence:.1%})"
+                    signal = f"⚪ 관망 ({confidence:.1%}){position_status}"
+
+                # 가격 표시 형식 (매우 작은 가격 대응)
+                if price < 0.0001:
+                    price_str = f"{price:.8f}"
+                elif price < 1:
+                    price_str = f"{price:.6f}"
+                else:
+                    price_str = f"{price:,.4f}"
 
                 print(
-                    f"{symbol:^12} | ${price:>10,.4f} | {dir_icon} {direction:^8} | {confidence:>6.1%} | {signal:^20}")
+                    f"{symbol:^12} | ${price_str:>10} | {dir_icon} {direction:^8} | {confidence:>6.1%} | {signal:^20}")
 
-                # 진입 조건
-                if manager.can_open_position(symbol, positions) and confidence >= CONF_THRESHOLD and direction in [
-                    "Long", "Short"]:
-                    if manager.open_position(symbol, direction, price):
-                        positions = API.get_positions()  # 포지션 업데이트
+                # ✅ 포지션 방향 체크
+                existing = next((p for p in positions if p.symbol == symbol), None)
+
+                # 같은 방향 포지션이면 청산하지 않음 (유지)
+                if existing and direction in ["Long", "Short"]:
+                    if existing.direction == direction:
+                        # 같은 방향 - 그대로 유지
+                        if DEBUG_MODE or loop_count <= 3:  # 처음 3번은 항상 표시
+                            hold_time = (datetime.now() - existing.entry_time).total_seconds() / 60
+                            print(f"   ℹ️  {symbol}: 같은 방향 포지션 유지 ({direction}) [보유: {hold_time:.1f}분]")
+                        continue  # ✅ 진입 로직 스킵 (재시작 후에도 유지)
+                    elif existing.direction != direction:
+                        # 반대 방향 - 청산 후 전환
+                        current_roe = existing.get_roe(price)
+                        current_pnl = existing.get_pnl(price)
+
+                        print(f"\n🔄 {symbol}: 반대 신호 감지 - 즉시 청산 후 전환")
+                        print(f"   방향: {existing.direction} → {direction}")
+                        print(f"   현재 손익: ${current_pnl:+.2f} (ROE: {current_roe:+.1f}%)")
+
+                        manager.close_position(existing, "Reverse Signal")
+                        time.sleep(1)
+                        positions = API.get_positions()
+
+                # 진입 조건 (신호가 강할 때만)
+                if confidence >= CONF_THRESHOLD and direction in ["Long", "Short"]:
+                    # 가격 유효성 재확인
+                    if price <= 0 or not np.isfinite(price):
+                        print(f"⚠️  {symbol}: 유효하지 않은 가격 (${price}) - 진입 스킵")
+                        continue
+
+                    # 기존 포지션 확인
+                    existing = next((p for p in positions if p.symbol == symbol), None)
+
+                    # 같은 방향 포지션이 있으면 스킵
+                    if existing and existing.direction == direction:
+                        if DEBUG_MODE:
+                            print(f"ℹ️  {symbol}: 같은 방향 포지션 보유 중 ({direction}) - 유지")
+                        continue
+
+                    # 반대 방향 포지션은 이미 위에서 청산 체크했으므로 계속 진행
+
+                    # 새로운 포지션 진입 (기존 포지션이 없거나 청산 후)
+                    can_open, reason = manager.can_open_position(symbol, direction, positions, available_balance)
+                    if can_open:
+                        if manager.open_position(symbol, direction, price, available_balance):
+                            time.sleep(1)  # 주문 처리 대기
+                            positions = API.get_positions()  # 포지션 업데이트
 
             print(f"\n[스캔 #{loop_count}] {current_time.strftime('%Y-%m-%d %H:%M:%S')}")
             print(f"다음 스캔까지 {INTERVAL_SEC}초... (Ctrl+C로 종료)")
@@ -1527,7 +1987,7 @@ def main():
         print("\n\n프로그램 종료 중...")
 
         # 최종 상태
-        balance = API.get_balance()
+        balance_info = API.get_balance()
         positions = API.get_positions()
         prices = {}
         for symbol in MODELS.keys():
@@ -1535,7 +1995,7 @@ def main():
             if ticker.get("retCode") == 0 and ticker["result"]["list"]:
                 prices[symbol] = float(ticker["result"]["list"][0]["lastPrice"])
 
-        print_dashboard(balance, positions, prices)
+        print_dashboard(balance_info, positions, prices)
         manager.save_trades()
 
         # 최종 통계
@@ -1544,7 +2004,8 @@ def main():
             print("\n" + "=" * 110)
             print(f"{'📊 최종 결과':^110}")
             print("=" * 110)
-            print(f"   최종 잔고:     ${balance:,.2f}")
+            print(f"   최종 잔고:     ${balance_info.get('total_balance', 0.0):,.2f}")
+            print(f"   사용가능:      ${balance_info.get('available_balance', 0.0):,.2f}")
             print(f"   일일 손익:     ${manager.daily_pnl:+,.2f}")
             print(f"   총 거래:       {stats['total_trades']}회")
             print(f"   승률:          {stats['win_rate']:.1f}%")

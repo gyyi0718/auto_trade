@@ -1,0 +1,34 @@
+{
+  "symbol": "SAPIENUSDT",
+  "interval": "5",
+  "total_timesteps": 100000,
+  "config": {
+    "stop_loss_mult": 3.0,
+    "take_profit_mult": 4.0,
+    "base_leverage": 5,
+    "min_holding": 2,
+    "learning_rate": 0.0005,
+    "ent_coef": 0.1
+  },
+  "test_stats": {
+    "final_equity": 1995.649747967865,
+    "total_return": -80.04350252032134,
+    "total_trades": 322,
+    "winning_trades": 118,
+    "win_rate": 36.64596273291926,
+    "max_drawdown": 80.04350252032134,
+    "total_pnl": -7998.646394255772,
+    "market_regime": "medium_vol",
+    "avg_volatility": 0.013313208160010187
+  },
+  "action_distribution": {
+    "0": 161,
+    "1": 161,
+    "2": 47
+  },
+  "avg_leverage": 5.0,
+  "avg_stop_loss": 2.0285429379081,
+  "avg_take_profit": 3.007822770442223,
+  "model_path": "rl_models_improved/SAPIENUSDT_5min_final.zip",
+  "trained_at": "2025-11-07T12:14:51.865256"
+}

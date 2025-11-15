@@ -1,0 +1,29 @@
+{
+  "symbol": "ETHUSDT",
+  "interval": "5",
+  "total_timesteps": 300000,
+  "config": {
+    "base_leverage": 8,
+    "learning_rate": 0.0003,
+    "ent_coef": 0.015,
+    "directional_weight": 0.5,
+    "min_holding": 2
+  },
+  "test_stats": {
+    "final_equity": 3738.739383325591,
+    "total_return": -62.61260616674409,
+    "total_trades": 169,
+    "winning_trades": 58,
+    "win_rate": 34.319526627218934,
+    "direction_accuracy": 50.887573964497044,
+    "max_drawdown": 62.836229257912976,
+    "total_pnl": -6244.133867108422
+  },
+  "action_distribution": {
+    "0": 85,
+    "1": 84,
+    "2": 0
+  },
+  "model_path": "rl_models_enhanced/ETHUSDT_5min_final.zip",
+  "trained_at": "2025-11-08T15:43:36.798511"
+}

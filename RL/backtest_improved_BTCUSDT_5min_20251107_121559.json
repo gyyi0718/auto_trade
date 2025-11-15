@@ -1,0 +1,241 @@
+{
+  "model_path": ".\\rl_models_improved\\SAPIENUSDT_5min_final.zip",
+  "symbol": "BTCUSDT",
+  "interval": "5",
+  "backtest_period": {
+    "start": "2025-11-03 16:00:00",
+    "end": "2025-11-07 03:15:00",
+    "candles": 1000
+  },
+  "stats": {
+    "final_equity": 10191.105330139984,
+    "total_return": 1.911053301399843,
+    "total_trades": 19,
+    "winning_trades": 10,
+    "win_rate": 52.63157894736842,
+    "max_drawdown": 25.46808234170712,
+    "total_pnl": 672.6035495492688,
+    "market_regime": "low_vol",
+    "avg_volatility": 0.0026295764329050753
+  },
+  "action_distribution": {
+    "0": 502,
+    "1": 467,
+    "2": 0
+  },
+  "avg_leverage": 4.737874097007224,
+  "avg_stop_loss": 2.0000000000000004,
+  "avg_take_profit": 3.0000000000000013,
+  "trades": [
+    {
+      "entry_price": 107250.6,
+      "exit_price": 106584.0,
+      "position": "short",
+      "pnl": 282.44462968039613,
+      "pnl_pct": 0.00621534984419673,
+      "holding_time": 50,
+      "reason": "Switch to LONG",
+      "leverage": 5,
+      "timestamp": "2025-11-03 22:45:00"
+    },
+    {
+      "entry_price": 106584.0,
+      "exit_price": 106413.3,
+      "position": "long",
+      "pnl": -111.59747013623095,
+      "pnl_pct": -0.0016015537041206662,
+      "holding_time": 50,
+      "reason": "Switch to SHORT",
+      "leverage": 5,
+      "timestamp": "2025-11-04 02:55:00"
+    },
+    {
+      "entry_price": 106413.3,
+      "exit_price": 104524.0,
+      "position": "short",
+      "pnl": 874.4121219001493,
+      "pnl_pct": 0.017754359652411896,
+      "holding_time": 50,
+      "reason": "Switch to LONG",
+      "leverage": 5,
+      "timestamp": "2025-11-04 07:05:00"
+    },
+    {
+      "entry_price": 104524.0,
+      "exit_price": 104287.6,
+      "position": "long",
+      "pnl": -156.31208793109317,
+      "pnl_pct": -0.0022616815276873654,
+      "holding_time": 50,
+      "reason": "Switch to SHORT",
+      "leverage": 5,
+      "timestamp": "2025-11-04 11:15:00"
+    },
+    {
+      "entry_price": 104287.6,
+      "exit_price": 104422.0,
+      "position": "short",
+      "pnl": -73.1726839372207,
+      "pnl_pct": -0.0012887438199747062,
+      "holding_time": 50,
+      "reason": "Switch to LONG",
+      "leverage": 3,
+      "timestamp": "2025-11-04 15:25:00"
+    },
+    {
+      "entry_price": 104422.0,
+      "exit_price": 102215.3,
+      "position": "long",
+      "pnl": -1160.9269829093262,
+      "pnl_pct": -0.021132519967056722,
+      "holding_time": 18,
+      "reason": "Stop Loss",
+      "leverage": 5,
+      "timestamp": "2025-11-04 16:55:00"
+    },
+    {
+      "entry_price": 101764.0,
+      "exit_price": 100257.6,
+      "position": "long",
+      "pnl": -455.8675630917815,
+      "pnl_pct": -0.014802877245391241,
+      "holding_time": 50,
+      "reason": "Switch to SHORT",
+      "leverage": 3,
+      "timestamp": "2025-11-04 21:10:00"
+    },
+    {
+      "entry_price": 100257.6,
+      "exit_price": 99437.6,
+      "position": "short",
+      "pnl": 360.58751628517575,
+      "pnl_pct": 0.008178931073554522,
+      "holding_time": 50,
+      "reason": "Switch to LONG",
+      "leverage": 5,
+      "timestamp": "2025-11-05 01:20:00"
+    },
+    {
+      "entry_price": 99437.6,
+      "exit_price": 101961.6,
+      "position": "long",
+      "pnl": 1185.3043670453003,
+      "pnl_pct": 0.02538275260062592,
+      "holding_time": 50,
+      "reason": "Switch to SHORT",
+      "leverage": 5,
+      "timestamp": "2025-11-05 05:30:00"
+    },
+    {
+      "entry_price": 101961.6,
+      "exit_price": 101889.1,
+      "position": "short",
+      "pnl": 7.599702991401646,
+      "pnl_pct": 0.0007110520038916612,
+      "holding_time": 50,
+      "reason": "Switch to LONG",
+      "leverage": 5,
+      "timestamp": "2025-11-05 09:40:00"
+    },
+    {
+      "entry_price": 101889.1,
+      "exit_price": 103171.8,
+      "position": "long",
+      "pnl": 645.7935493506725,
+      "pnl_pct": 0.012589177841398118,
+      "holding_time": 50,
+      "reason": "Switch to SHORT",
+      "leverage": 5,
+      "timestamp": "2025-11-05 13:50:00"
+    },
+    {
+      "entry_price": 103171.8,
+      "exit_price": 103794.8,
+      "position": "short",
+      "pnl": -376.82172479473445,
+      "pnl_pct": -0.0060384717529402415,
+      "holding_time": 50,
+      "reason": "Switch to LONG",
+      "leverage": 5,
+      "timestamp": "2025-11-05 18:00:00"
+    },
+    {
+      "entry_price": 103794.8,
+      "exit_price": 103259.8,
+      "position": "long",
+      "pnl": -315.29389079750945,
+      "pnl_pct": -0.005154400798498576,
+      "holding_time": 50,
+      "reason": "Switch to SHORT",
+      "leverage": 5,
+      "timestamp": "2025-11-05 22:10:00"
+    },
+    {
+      "entry_price": 103259.8,
+      "exit_price": 102841.3,
+      "position": "short",
+      "pnl": 186.56505195150706,
+      "pnl_pct": 0.0040528840846098865,
+      "holding_time": 50,
+      "reason": "Switch to LONG",
+      "leverage": 5,
+      "timestamp": "2025-11-06 02:20:00"
+    },
+    {
+      "entry_price": 102841.3,
+      "exit_price": 103325.9,
+      "position": "long",
+      "pnl": 225.44808020898057,
+      "pnl_pct": 0.004712114685442436,
+      "holding_time": 50,
+      "reason": "Switch to SHORT",
+      "leverage": 5,
+      "timestamp": "2025-11-06 06:30:00"
+    },
+    {
+      "entry_price": 103325.9,
+      "exit_price": 103070.6,
+      "position": "short",
+      "pnl": 105.74658297402155,
+      "pnl_pct": 0.0024708229011311624,
+      "holding_time": 50,
+      "reason": "Switch to LONG",
+      "leverage": 5,
+      "timestamp": "2025-11-06 10:40:00"
+    },
+    {
+      "entry_price": 103070.6,
+      "exit_price": 102089.6,
+      "position": "long",
+      "pnl": -565.8153844219854,
+      "pnl_pct": -0.009517748029020884,
+      "holding_time": 50,
+      "reason": "Switch to SHORT",
+      "leverage": 5,
+      "timestamp": "2025-11-06 14:50:00"
+    },
+    {
+      "entry_price": 102089.6,
+      "exit_price": 101642.8,
+      "position": "short",
+      "pnl": 202.98565046905713,
+      "pnl_pct": 0.0043765476600946904,
+      "holding_time": 50,
+      "reason": "Switch to LONG",
+      "leverage": 5,
+      "timestamp": "2025-11-06 19:00:00"
+    },
+    {
+      "entry_price": 101642.8,
+      "exit_price": 101347.8,
+      "position": "long",
+      "pnl": -188.47591528751127,
+      "pnl_pct": -0.002902320675935728,
+      "holding_time": 50,
+      "reason": "Switch to SHORT",
+      "leverage": 5,
+      "timestamp": "2025-11-06 23:10:00"
+    }
+  ],
+  "tested_at": "2025-11-07T12:15:59.433978"
+}
