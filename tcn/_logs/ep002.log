@@ -1,6 +1,0 @@
-[INFO] Loaded model with 13 features: ['ret1', 'rv5', 'rv10', 'rv20', 'rv60', 'mom5', 'mom10', 'mom20', 'mom60', 'vz10', 'vz20', 'vz60', 'atr14']
-[INFO] Stop Loss: 175.0 bps (TP: 350.0 bps, R:R = 0.50:1)
-[INFO] Processing 7 symbols
-[FULL-VAL] trades=555 | hit=45.23% | sum_bps=19591.8 | fees=$115.18 | equity 10000.00 -> 10896.48 (x1.090)
-[SAVED] ./_tmp_val_ep002.csv
-[0m
